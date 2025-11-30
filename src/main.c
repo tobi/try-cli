@@ -71,6 +71,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       print_help();
       return 0;
+    } else if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+      printf("try %s\n", TRY_VERSION);
+      return 0;
     } else {
       cmd_argv[cmd_argc++] = argv[i];
     }
