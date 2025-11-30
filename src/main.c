@@ -14,6 +14,8 @@
 
 // Compact help for direct mode
 static void print_help(void) {
+  Z_CLEANUP(zstr_free) zstr default_path = get_default_tries_path();
+
   Z_CLEANUP(zstr_free) zstr help = zstr_from(
     "{h1}try{reset} v" TRY_VERSION " - ephemeral workspace manager\n\n"
     "To use try, add to your shell config:\n\n"
@@ -27,7 +29,12 @@ static void print_help(void) {
     "  {b}try worktree{/b} <name> Create worktree from current git repo\n"
     "  {b}try --help{/b}          Show this help\n\n"
     "{dim}Manual mode (without alias):{reset}\n"
-    "  {b}try exec{/b} [query]    Output shell script to eval\n");
+    "  {b}try exec{/b} [query]    Output shell script to eval\n\n"
+    "{dim}Defaults:{reset}\n"
+    "  Default path: {dim}~/src/tries{reset} (override with {b}--path{/b} on init)\n"
+    "  Current default: {dim}");
+  zstr_cat(&help, zstr_cstr(&default_path));
+  zstr_cat(&help, "{reset}\n");
 
   Z_CLEANUP(zstr_free) zstr expanded = zstr_expand_tokens(zstr_cstr(&help));
   fprintf(stderr, "%s", zstr_cstr(&expanded));
