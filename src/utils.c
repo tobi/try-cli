@@ -11,66 +11,52 @@
 #include <time.h>
 #include <unistd.h>
 
-char *expand_tokens(const char *text) {
-  // Simple replacement for now, can be optimized
-  // Supported tokens: {h1}, {h2}, {highlight}, {text}, {dim_text}, {reset},
-  // {reset_fg} Note: In C, we'll do a simple multi-pass or single-pass
-  // replacement. For simplicity/speed in this MVP, let's just return a strdup
-  // if no tokens, or implement a basic replacer.
-
-  // Actually, let's implement a dynamic buffer builder
-  size_t size = strlen(text) * 2 + 100; // Rough estimate
-  char *buffer = malloc(size);
-  char *out = buffer;
+zstr zstr_expand_tokens(const char *text) {
+  zstr buffer = zstr_init();
   const char *in = text;
 
   while (*in) {
     if (*in == '{') {
       if (strncmp(in, "{h1}", 4) == 0) {
-        out += sprintf(out, "%s%s", ANSI_BOLD, ANSI_MAGENTA);
+        zstr_cat(&buffer, ANSI_BOLD);
+        zstr_cat(&buffer, "\033[38;5;214m"); // Orange
         in += 4;
       } else if (strncmp(in, "{h2}", 4) == 0) {
-        out += sprintf(out, "%s%s", ANSI_BOLD, ANSI_BLUE);
+        zstr_cat(&buffer, ANSI_BOLD);
+        zstr_cat(&buffer, ANSI_BLUE);
         in += 4;
-      } else if (strncmp(in, "{highlight}", 11) == 0) {
-        out += sprintf(out, "%s%s", ANSI_BOLD, ANSI_YELLOW);
-        in += 11;
-      } else if (strncmp(in, "{text}", 6) == 0) {
-        out += sprintf(out, "%s", ANSI_RESET); // basic reset for now
-      } else if (strncmp(in, "{dim_text}", 10) == 0) {
-        out += sprintf(out, "%s", ANSI_DIM);
-        in += 10;
+      } else if (strncmp(in, "{b}", 3) == 0) {
+        zstr_cat(&buffer, ANSI_BOLD);
+        zstr_cat(&buffer, ANSI_YELLOW);
+        in += 3;
+      } else if (strncmp(in, "{/b}", 4) == 0) {
+        zstr_cat(&buffer, "\033[22m"); // Turn off bold
+        in += 4;
+      } else if (strncmp(in, "{dim}", 5) == 0) {
+        zstr_cat(&buffer, ANSI_DIM);
+        in += 5;
       } else if (strncmp(in, "{reset}", 7) == 0) {
-        out += sprintf(out, "%s", ANSI_RESET);
+        zstr_cat(&buffer, ANSI_RESET);
         in += 7;
-      } else if (strncmp(in, "{reset_fg}", 10) == 0) {
-        out += sprintf(out, "%s", ANSI_RESET); // Close enough
-        in += 10;
+      } else if (strncmp(in, "{/fg}", 5) == 0) {
+        zstr_cat(&buffer, "\033[39m"); // Reset foreground
+        in += 5;
       } else if (strncmp(in, "{text}", 6) == 0) {
-        out += sprintf(out, "%s", ANSI_RESET);
+        zstr_cat(&buffer, ANSI_RESET);
         in += 6;
-      } else if (strncmp(in, "{start_selected}", 16) == 0) {
-        out += sprintf(out, "%s", ANSI_BOLD);
-        in += 16;
-      } else if (strncmp(in, "{end_selected}", 14) == 0) {
-        out += sprintf(out, "%s", ANSI_RESET);
-        in += 14;
+      } else if (strncmp(in, "{section}", 9) == 0) {
+        zstr_cat(&buffer, ANSI_BOLD);
+        in += 9;
+      } else if (strncmp(in, "{/section}", 10) == 0) {
+        zstr_cat(&buffer, ANSI_RESET);
+        in += 10;
       } else {
-        *out++ = *in++;
+        zstr_push(&buffer, *in++);
       }
     } else {
-      *out++ = *in++;
-    }
-
-    // Check bounds (crude realloc if needed, but for now assume enough)
-    if (out - buffer > (long)size - 50) {
-      size *= 2;
-      long offset = out - buffer;
-      buffer = realloc(buffer, size);
-      out = buffer + offset;
+      zstr_push(&buffer, *in++);
     }
   }
-  *out = '\0';
   return buffer;
 }
 
@@ -87,29 +73,29 @@ char *trim(char *str) {
   return str;
 }
 
-char *get_home_dir() {
+zstr get_home_dir() {
   const char *home = getenv("HOME");
   if (!home) {
     struct passwd *pw = getpwuid(getuid());
     if (pw)
       home = pw->pw_dir;
   }
-  return home ? strdup(home) : NULL;
+  return home ? zstr_from(home) : zstr_init();
 }
 
-char *join_path(const char *dir, const char *file) {
-  size_t len = strlen(dir) + strlen(file) + 2;
-  char *path = malloc(len);
-  sprintf(path, "%s/%s", dir, file);
-  return path;
+zstr join_path(const char *dir, const char *file) {
+  zstr s = zstr_from(dir);
+  zstr_cat(&s, "/");
+  zstr_cat(&s, file);
+  return s;
 }
 
-char *get_default_tries_path() {
-  char *home = get_home_dir();
-  if (!home)
-    return NULL;
-  char *path = join_path(home, DEFAULT_TRIES_PATH_SUFFIX);
-  free(home);
+zstr get_default_tries_path() {
+  Z_CLEANUP(zstr_free) zstr home = get_home_dir();
+  if (zstr_is_empty(&home))
+    return home;
+  zstr path = join_path(zstr_cstr(&home), DEFAULT_TRIES_PATH_SUFFIX);
+  zstr_free(&home);
   return path;
 }
 
@@ -154,19 +140,19 @@ int mkdir_p(const char *path) {
   return 0;
 }
 
-char *format_relative_time(time_t mtime) {
+zstr format_relative_time(time_t mtime) {
   time_t now = time(NULL);
   double diff = difftime(now, mtime);
-  char *buf = malloc(64);
+  zstr s = zstr_init();
 
   if (diff < 60) {
-    sprintf(buf, "just now");
+    zstr_cat(&s, "just now");
   } else if (diff < 3600) {
-    sprintf(buf, "%dm ago", (int)(diff / 60));
+    zstr_fmt(&s, "%dm ago", (int)(diff / 60));
   } else if (diff < 86400) {
-    sprintf(buf, "%dh ago", (int)(diff / 3600));
+    zstr_fmt(&s, "%dh ago", (int)(diff / 3600));
   } else {
-    sprintf(buf, "%dd ago", (int)(diff / 86400));
+    zstr_fmt(&s, "%dd ago", (int)(diff / 86400));
   }
-  return buf;
+  return s;
 }

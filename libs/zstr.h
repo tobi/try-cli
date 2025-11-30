@@ -241,7 +241,7 @@ static inline void zstr_clear(zstr *s)
 // Handles the transition from SSO (Stack) to Long (Heap).
 static inline int zstr_reserve(zstr *s, size_t new_cap)
 {
-    if (new_cap <= ZSTR_SSO_CAP) return Z_OK;
+    if (new_cap < ZSTR_SSO_CAP) return Z_OK;
     if (s->is_long && new_cap <= s->l.cap) return Z_OK;
 
     char *new_ptr;

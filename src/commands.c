@@ -20,9 +20,8 @@ void emit_task(const char *type, const char *arg1, const char *arg2) {
     printf("git clone '%s' '%s' \\\n  && ", arg1, arg2);
   } else if (strcmp(type, "echo") == 0) {
     // Expand tokens for echo
-    char *expanded = expand_tokens(arg1);
-    printf("echo '%s' \\\n  && ", expanded);
-    free(expanded);
+    Z_CLEANUP(zstr_free) zstr expanded = zstr_expand_tokens(arg1);
+    printf("echo '%s' \\\n  && ", zstr_cstr(&expanded));
   }
 }
 
@@ -56,35 +55,40 @@ void cmd_clone(int argc, char **argv, const char *tries_path) {
   char *url = argv[0];
   char *name = (argc > 1) ? argv[1] : NULL;
 
-  // Generate name if not provided (simplified)
-  char dir_name[256];
+  // Generate name if not provided
+  Z_CLEANUP(zstr_free) zstr dir_name = zstr_init();
+
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
   char date_prefix[20];
   strftime(date_prefix, sizeof(date_prefix), "%Y-%m-%d", t);
+  zstr_cat(&dir_name, date_prefix);
+  zstr_cat(&dir_name, "-");
 
   if (name) {
-    snprintf(dir_name, sizeof(dir_name), "%s-%s", date_prefix, name);
+    zstr_cat(&dir_name, name);
   } else {
     // Extract repo name from URL
     char *last_slash = strrchr(url, '/');
     char *repo_name = last_slash ? last_slash + 1 : url;
     char *dot_git = strstr(repo_name, ".git");
-    if (dot_git)
-      *dot_git = '\0';
-    snprintf(dir_name, sizeof(dir_name), "%s-%s", date_prefix, repo_name);
+
+    if (dot_git) {
+      zstr_cat_len(&dir_name, repo_name, dot_git - repo_name);
+    } else {
+      zstr_cat(&dir_name, repo_name);
+    }
   }
 
-  char *full_path = join_path(tries_path, dir_name);
+  Z_CLEANUP(zstr_free)
+  zstr full_path = join_path(tries_path, zstr_cstr(&dir_name));
 
-  emit_task("echo", "Cloning into {highlight}new try{reset}...", NULL);
-  emit_task("mkdir", full_path, NULL);
-  emit_task("git-clone", url, full_path);
-  emit_task("touch", full_path, NULL); // Update mtime
-  emit_task("cd", full_path, NULL);
+  emit_task("echo", "Cloning into {b}new try{/b}...", NULL);
+  emit_task("mkdir", zstr_cstr(&full_path), NULL);
+  emit_task("git-clone", url, zstr_cstr(&full_path));
+  emit_task("touch", zstr_cstr(&full_path), NULL); // Update mtime
+  emit_task("cd", zstr_cstr(&full_path), NULL);
   printf("true\n"); // End chain
-
-  free(full_path);
 }
 
 void cmd_worktree(int argc, char **argv, const char *tries_path) {
@@ -99,7 +103,7 @@ void cmd_worktree(int argc, char **argv, const char *tries_path) {
   exit(1);
 }
 
-void cmd_cd(int argc, char **argv, const char *tries_path) {
+void cmd_cd(int argc, char **argv, const char *tries_path, TestMode *test_mode) {
   // If args provided, try to find match or use as filter
   char *initial_filter = NULL;
   if (argc > 0) {
@@ -108,21 +112,20 @@ void cmd_cd(int argc, char **argv, const char *tries_path) {
     initial_filter = argv[0];
   }
 
-  SelectionResult result = run_selector(tries_path, initial_filter);
+  SelectionResult result = run_selector(tries_path, initial_filter, test_mode);
 
   if (result.type == ACTION_CD) {
-    emit_task("touch", result.path, NULL); // Update mtime
-    emit_task("cd", result.path, NULL);
+    emit_task("touch", zstr_cstr(&result.path), NULL); // Update mtime
+    emit_task("cd", zstr_cstr(&result.path), NULL);
     printf("true\n");
   } else if (result.type == ACTION_MKDIR) {
-    emit_task("mkdir", result.path, NULL);
-    emit_task("cd", result.path, NULL);
+    emit_task("mkdir", zstr_cstr(&result.path), NULL);
+    emit_task("cd", zstr_cstr(&result.path), NULL);
     printf("true\n");
   } else {
     // Cancelled
     printf("true\n");
   }
 
-  if (result.path)
-    free(result.path);
+  zstr_free(&result.path);
 }

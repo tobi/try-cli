@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -45,7 +46,11 @@ int read_key() {
   unsigned char c;
   // Blocking read (VMIN=1, VTIME=0 set in enable_raw_mode)
   while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-    if (nread == -1 && errno != EAGAIN) {
+    if (nread == -1) {
+      if (errno == EAGAIN)
+        continue;
+      if (errno == EINTR)
+        return -2; // KEY_RESIZE
       return -1;
     }
     if (nread == 0) {
@@ -69,8 +74,10 @@ int read_key() {
 
     // Simple hack: set non-blocking for the next bytes
     struct termios original_state;
+    memset(&original_state, 0, sizeof(original_state));
     tcgetattr(STDIN_FILENO, &original_state);
-    struct termios nonblock = original_state;
+    struct termios nonblock;
+    memcpy(&nonblock, &original_state, sizeof(nonblock));
     nonblock.c_cc[VMIN] = 0;
     nonblock.c_cc[VTIME] = 1; // 100ms
     tcsetattr(STDIN_FILENO, TCSANOW, &nonblock);

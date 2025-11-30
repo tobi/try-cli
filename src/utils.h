@@ -1,7 +1,9 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#include "zstr.h"
 #include <stdbool.h>
+#include <stdlib.h>
 #include <time.h>
 
 // ANSI Colors
@@ -16,19 +18,24 @@
 #define ANSI_CYAN "\033[36m"
 #define ANSI_WHITE "\033[37m"
 
-// Token expansion for UI (similar to Ruby's {highlight}, {h1}, etc.)
-char *expand_tokens(const char *text);
+// Defer helper for standard pointers (zstr has Z_CLEANUP(zstr_free))
+static inline void cleanup_free(void *p) { free(*(void **)p); }
+#define AUTO_FREE Z_CLEANUP(cleanup_free)
+
+// Token expansion for UI
+// Returns a zstr that must be freed (or use Z_CLEANUP(zstr_free))
+zstr zstr_expand_tokens(const char *text);
 
 // String helpers
-char *trim(char *str);
-char *join_path(const char *dir, const char *file);
-char *get_home_dir();
-char *get_default_tries_path();
+char *trim(char *str); // Operates in-place
+zstr join_path(const char *dir, const char *file);
+zstr get_home_dir();
+zstr get_default_tries_path();
 
 // File helpers
 bool dir_exists(const char *path);
 bool file_exists(const char *path);
 int mkdir_p(const char *path);
-char *format_relative_time(time_t mtime);
+zstr format_relative_time(time_t mtime);
 
 #endif // UTILS_H

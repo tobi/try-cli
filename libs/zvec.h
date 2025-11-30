@@ -249,7 +249,7 @@ static inline T* vec_lower_bound_##Name(vec_##Name *v, const T *key,            
     size_t r = v->length;                                                                   \
     while (l < r) {                                                                         \
         size_t mid = l + (r - l) / 2;                                                       \
-        if (compar(&v->data[mid], key) < 0) {                                               \
+        if (compar((const T *)&v->data[mid], key) < 0) {                                    \
             l = mid + 1;                                                                    \
         } else {                                                                            \
             r = mid;                                                                        \

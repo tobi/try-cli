@@ -16,7 +16,8 @@ enum EditorKey {
   PAGE_UP,
   PAGE_DOWN,
   ENTER_KEY = 13,
-  ESC_KEY = 27
+  ESC_KEY = 27,
+  KEY_RESIZE = -2
 };
 
 void enable_raw_mode();
