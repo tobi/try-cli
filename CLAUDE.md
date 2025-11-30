@@ -61,7 +61,7 @@ Commands are emitted via `emit_task()` in `src/commands.c`, which prints shell s
 - `calculate_score()`: Combines fuzzy match score with recency (mtime)
 - `highlight_matches()`: Inserts `{b}` tokens around matched characters
 - Algorithm favors consecutive character matches and recent access times
-- **Documentation**: See `docs/fuzzy_matching.md` for complete algorithm specification
+- **Documentation**: See `spec/fuzzy_matching.md` for complete algorithm specification
 
 **Terminal Management** (`src/terminal.c`, `src/terminal.h`):
 - Raw mode terminal control (disables canonical mode, echo)
@@ -110,7 +110,7 @@ Manual cleanup still required in some cases:
 
 The UI uses a token-based formatting system for dynamic styling. Tokens are placeholder strings embedded in text that get expanded to ANSI escape codes via `zstr_expand_tokens()` in `src/utils.c`. This allows formatting to be defined declaratively without hardcoding ANSI sequences throughout the codebase.
 
-**Documentation**: See `docs/token_system.md` for complete token specifications and usage patterns.
+**Documentation**: See `spec/token_system.md` for complete token specifications and usage patterns.
 
 **Available Tokens:**
 
@@ -226,7 +226,8 @@ The `src/libs/` directory contains bundled single-header libraries (zstr, zvec, 
 
 - `src/` - C source and header files
 - `src/libs/` - Bundled single-header libraries (z-libs: zstr, zvec, zlist)
-- `docs/` - Reference implementation and documentation
+- `spec/` - Try specifications (CLI structure, fuzzy matching, token system, TUI)
+- `docs/` - Reference implementation and z-libs documentation
 - `test/` - Test suite (test.sh)
 - `obj/` - Object files (created by make, gitignored)
 - `dist/` - Build output directory (created by make, gitignored)
@@ -248,11 +249,11 @@ The `src/libs/` directory contains bundled single-header libraries (zstr, zvec, 
 **IMPORTANT**: When making changes to certain subsystems, their corresponding documentation files must be updated:
 
 - **Token expansion** (`src/utils.c`, `zstr_expand_tokens()`):
-  - Update `docs/token_system.md` with any new tokens or changed ANSI codes
+  - Update `spec/token_system.md` with any new tokens or changed ANSI codes
   - Update the token table in this file (CLAUDE.md)
 
 - **Fuzzy matching algorithm** (`src/fuzzy.c`, `fuzzy_match()`):
-  - Update `docs/fuzzy_matching.md` with algorithm changes
+  - Update `spec/fuzzy_matching.md` with algorithm changes
   - Update scoring examples if formulas change
   - Document any new bonuses, multipliers, or scoring components
 
