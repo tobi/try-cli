@@ -41,8 +41,8 @@ TokenExpansion zstr_expand_tokens_with_cursor(const char *text);
 // String helpers
 char *trim(char *str); // Operates in-place
 zstr join_path(const char *dir, const char *file);
-zstr get_home_dir();
-zstr get_default_tries_path();
+zstr get_home_dir(void);
+zstr get_default_tries_path(void);
 
 // File helpers
 bool dir_exists(const char *path);

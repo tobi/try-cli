@@ -1,6 +1,7 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -Werror -std=c11 -g -Isrc/libs
-LDFLAGS =
+CC ?= gcc
+CFLAGS ?= -Wall -Wextra -Werror -Wpedantic -Wshadow -Wstrict-prototypes \
+          -Wno-unused-function -std=c11 -g -Isrc/libs
+LDFLAGS ?=
 
 SRC_DIR = src
 OBJ_DIR = obj

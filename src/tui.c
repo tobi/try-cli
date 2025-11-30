@@ -9,6 +9,7 @@
 #include "fuzzy.h"
 #include "terminal.h"
 #include "utils.h"
+#include "zvec.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <signal.h>
@@ -22,65 +23,11 @@
 // Helper macro to ignore write return values
 #define WRITE(fd, buf, len) do { ssize_t unused = write(fd, buf, len); (void)unused; } while(0)
 
-// Minimal vector implementation for TryEntry (only what we use)
-typedef struct {
-    TryEntry *data;
-    size_t length;
-    size_t capacity;
-} vec_TryEntry;
+// Generate vector implementation for TryEntry
+Z_VEC_GENERATE_IMPL(TryEntry, TryEntry)
 
-static inline int vec_reserve_TryEntry(vec_TryEntry *v, size_t new_cap) {
-    if (new_cap <= v->capacity) return 0;
-    TryEntry *new_data = realloc(v->data, new_cap * sizeof(TryEntry));
-    if (!new_data) return -1;
-    v->data = new_data;
-    v->capacity = new_cap;
-    return 0;
-}
-
-static inline int vec_push_TryEntry(vec_TryEntry *v, TryEntry value) {
-    if (v->length >= v->capacity) {
-        size_t new_cap = v->capacity == 0 ? 32 : v->capacity * 2;
-        if (vec_reserve_TryEntry(v, new_cap) != 0) return -1;
-    }
-    v->data[v->length++] = value;
-    return 0;
-}
-
-static inline void vec_clear_TryEntry(vec_TryEntry *v) { v->length = 0; }
-static inline void vec_free_TryEntry(vec_TryEntry *v) { free(v->data); *v = (vec_TryEntry){0}; }
-
-// Minimal vector implementation for TryEntry pointers
-typedef struct {
-    TryEntry **data;
-    size_t length;
-    size_t capacity;
-} vec_TryEntryPtr;
-
-static inline int vec_reserve_TryEntryPtr(vec_TryEntryPtr *v, size_t new_cap) {
-    if (new_cap <= v->capacity) return 0;
-    TryEntry **new_data = realloc(v->data, new_cap * sizeof(TryEntry *));
-    if (!new_data) return -1;
-    v->data = new_data;
-    v->capacity = new_cap;
-    return 0;
-}
-
-static inline int vec_push_TryEntryPtr(vec_TryEntryPtr *v, TryEntry *value) {
-    if (v->length >= v->capacity) {
-        size_t new_cap = v->capacity == 0 ? 32 : v->capacity * 2;
-        if (vec_reserve_TryEntryPtr(v, new_cap) != 0) return -1;
-    }
-    v->data[v->length++] = value;
-    return 0;
-}
-
-static inline void vec_clear_TryEntryPtr(vec_TryEntryPtr *v) { v->length = 0; }
-static inline void vec_free_TryEntryPtr(vec_TryEntryPtr *v) { free(v->data); *v = (vec_TryEntryPtr){0}; }
-
-// Generic foreach macro
-#define vec_foreach(v, iter) \
-    for (size_t _i = 0; _i < (v)->length && ((iter) = &(v)->data[_i]); ++_i)
+// Generate vector implementation for TryEntry pointers
+Z_VEC_GENERATE_IMPL(TryEntry *, TryEntryPtr)
 
 static vec_TryEntry all_tries = {0};
 static vec_TryEntryPtr filtered_ptrs = {0};
@@ -99,7 +46,7 @@ static void free_entry(TryEntry *entry) {
   zstr_free(&entry->rendered);
 }
 
-static void clear_state() {
+static void clear_state(void) {
   // Free contents of all_tries
   for (size_t i = 0; i < all_tries.length; i++) {
     free_entry(&all_tries.data[i]);
@@ -156,7 +103,7 @@ static void scan_tries(const char *base_path) {
   closedir(d);
 }
 
-static void filter_tries() {
+static void filter_tries(void) {
   vec_clear_TryEntryPtr(&filtered_ptrs);
   const char *query = zstr_cstr(&filter_buffer);
 
@@ -377,11 +324,11 @@ static void render(const char *base_path) {
 
       // Add filter text with spaces replaced by dashes
       const char *filter_text = zstr_cstr(&filter_buffer);
-      for (size_t i = 0; i < zstr_len(&filter_buffer); i++) {
-        if (isspace(filter_text[i])) {
+      for (size_t j = 0; j < zstr_len(&filter_buffer); j++) {
+        if (isspace(filter_text[j])) {
           zstr_push(&preview, '-');
         } else {
-          zstr_push(&preview, filter_text[i]);
+          zstr_push(&preview, filter_text[j]);
         }
       }
 

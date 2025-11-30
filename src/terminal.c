@@ -17,7 +17,7 @@
 static struct termios orig_termios;
 static int raw_mode_enabled = 0;
 
-void disable_raw_mode() {
+void disable_raw_mode(void) {
   if (raw_mode_enabled) {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
     raw_mode_enabled = 0;
@@ -25,7 +25,7 @@ void disable_raw_mode() {
   }
 }
 
-void enable_raw_mode() {
+void enable_raw_mode(void) {
   if (tcgetattr(STDIN_FILENO, &orig_termios) == -1)
     return; // Not a TTY?
 
@@ -47,7 +47,7 @@ void enable_raw_mode() {
   hide_cursor();
 }
 
-int read_key() {
+int read_key(void) {
   int nread;
   unsigned char c;
   // Blocking read (VMIN=1, VTIME=0 set in enable_raw_mode)
@@ -185,19 +185,19 @@ int get_window_size(int *rows, int *cols) {
   return 0;
 }
 
-void clear_screen() {
+void clear_screen(void) {
   // Clear screen and home cursor
   ssize_t unused1 = write(STDERR_FILENO, "\x1b[2J", 4);
   ssize_t unused2 = write(STDERR_FILENO, "\x1b[H", 3);
   (void)unused1; (void)unused2;
 }
 
-void hide_cursor() {
+void hide_cursor(void) {
   ssize_t unused = write(STDERR_FILENO, "\x1b[?25l", 6);
   (void)unused;
 }
 
-void show_cursor() {
+void show_cursor(void) {
   ssize_t unused = write(STDERR_FILENO, "\x1b[?25h", 6);
   (void)unused;
 }

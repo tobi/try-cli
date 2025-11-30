@@ -20,12 +20,12 @@ enum EditorKey {
   KEY_RESIZE = -2
 };
 
-void enable_raw_mode();
-void disable_raw_mode();
+void enable_raw_mode(void);
+void disable_raw_mode(void);
 int get_window_size(int *rows, int *cols);
-int read_key();
-void clear_screen();
-void hide_cursor();
-void show_cursor();
+int read_key(void);
+void clear_screen(void);
+void hide_cursor(void);
+void show_cursor(void);
 
 #endif // TERMINAL_H

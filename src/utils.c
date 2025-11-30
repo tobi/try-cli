@@ -103,7 +103,7 @@ char *trim(char *str) {
   return str;
 }
 
-zstr get_home_dir() {
+zstr get_home_dir(void) {
   const char *home = getenv("HOME");
   if (!home) {
     struct passwd *pw = getpwuid(getuid());
@@ -120,7 +120,7 @@ zstr join_path(const char *dir, const char *file) {
   return s;
 }
 
-zstr get_default_tries_path() {
+zstr get_default_tries_path(void) {
   Z_CLEANUP(zstr_free) zstr home = get_home_dir();
   if (zstr_is_empty(&home))
     return home;

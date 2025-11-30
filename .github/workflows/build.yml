@@ -21,54 +21,47 @@ jobs:
             runner: ubuntu-latest
             cc: gcc
 
-          # Linux ARM64
+          # Linux ARM64 (cross-compile)
           - os: linux
             arch: aarch64
             runner: ubuntu-latest
             cc: aarch64-linux-gnu-gcc
+            cross: true
 
           # macOS x86_64
           - os: darwin
             arch: x86_64
-            runner: macos-latest
+            runner: macos-13
             cc: clang
 
           # macOS ARM64 (Apple Silicon)
           - os: darwin
             arch: aarch64
-            runner: macos-latest
+            runner: macos-14
             cc: clang
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install dependencies (Linux ARM64)
-      if: matrix.os == 'linux' && matrix.arch == 'aarch64'
+    - name: Install cross-compiler (Linux ARM64)
+      if: matrix.cross
       run: |
         sudo apt-get update
         sudo apt-get install -y gcc-aarch64-linux-gnu
 
-    - name: Set up build environment
-      run: |
-        echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
-        echo "CFLAGS=-Wall -Wextra -Werror -std=c11 -g -Isrc/libs" >> $GITHUB_ENV
-        echo "LDFLAGS=" >> $GITHUB_ENV
-
-    - name: Build try binary
-      run: |
-        make clean
-        make
+    - name: Build
+      run: make CC=${{ matrix.cc }}
 
     - name: Verify binary
+      if: ${{ !matrix.cross }}
       run: |
         file ./dist/try
-        ./dist/try --help | head -5
+        ./dist/try --help 2>&1 | head -5
 
-    - name: Run tests (Linux/macOS x86_64 only)
-      if: matrix.arch == 'x86_64'
-      run: |
-        make test
+    - name: Run tests
+      if: ${{ !matrix.cross }}
+      run: make test
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
@@ -97,14 +90,9 @@ jobs:
         cd ./artifacts
         for dir in try-*; do
           if [ -d "$dir" ]; then
-            # Make binary executable
             chmod +x "$dir/try"
-
-            # Rename binary with platform info
             platform=$(echo "$dir" | sed 's/try-//')
             mv "$dir/try" "$dir/try-$platform"
-
-            # Create archive
             tar -czf "${dir}.tar.gz" -C "$dir" "try-$platform"
           fi
         done
