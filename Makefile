@@ -1,6 +1,6 @@
 CC ?= gcc
-CFLAGS ?= -Wall -Wextra -Werror -Wpedantic -Wshadow -Wstrict-prototypes \
-          -Wno-unused-function -std=c11 -g -Isrc/libs
+CFLAGS += -Wall -Wextra -Werror -Wpedantic -Wshadow -Wstrict-prototypes \
+          -Wno-unused-function -std=c11 -Isrc/libs
 LDFLAGS ?=
 
 SRC_DIR = src
