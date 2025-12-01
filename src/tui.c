@@ -642,7 +642,7 @@ SelectionResult run_selector(const char *base_path,
     sa.sa_flags = 0;
     sigaction(SIGWINCH, &sa, NULL);
 
-    clear_screen();
+    enable_alternate_screen();
   }
 
   SelectionResult result = {.type = ACTION_CANCEL, .path = zstr_init()};
@@ -756,12 +756,12 @@ SelectionResult run_selector(const char *base_path,
   }
 
   if (!is_test || !mode->inject_keys) {
-    // Reset terminal state completely
+    // Disable alternate screen buffer (restores original screen)
+    disable_alternate_screen();
+    // Reset terminal state
     disable_raw_mode();
-    // Send final cleanup sequences
-    fprintf(stderr, "\x1b[0m");   // Reset all attributes
-    fprintf(stderr, "\x1b[2J");   // Clear screen
-    fprintf(stderr, "\x1b[H");    // Move cursor to home (1,1)
+    // Reset all attributes
+    fprintf(stderr, "\x1b[0m");
     fflush(stderr);
   }
 

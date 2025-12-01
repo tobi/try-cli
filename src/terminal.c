@@ -254,6 +254,18 @@ int get_window_size(int *rows, int *cols) {
   return 0;
 }
 
+void enable_alternate_screen(void) {
+  // Enable alternate screen buffer (saves current screen, switches to blank alternate)
+  ssize_t unused = write(STDERR_FILENO, "\x1b[?1049h", 9);
+  (void)unused;
+}
+
+void disable_alternate_screen(void) {
+  // Disable alternate screen buffer (restores original screen)
+  ssize_t unused = write(STDERR_FILENO, "\x1b[?1049l", 9);
+  (void)unused;
+}
+
 void clear_screen(void) {
   // Clear screen and home cursor
   ssize_t unused1 = write(STDERR_FILENO, "\x1b[2J", 4);
