@@ -261,11 +261,8 @@ void cmd_init(int argc, char **argv, const char *tries_path) {
     printf(
       "function try\n"
       "  set -l out ('%s' exec --path '%s' $argv 2>/dev/tty)\n"
-      "  if test $status -eq 0\n"
-      "    eval $out\n"
-      "  else\n"
-      "    echo $out\n"
-      "  end\n"
+      "  or begin; echo $out; return $status; end\n"
+      "  eval $out\n"
       "end\n",
       self_path, tries_path);
   } else {
@@ -273,12 +270,11 @@ void cmd_init(int argc, char **argv, const char *tries_path) {
     printf(
       "try() {\n"
       "  local out\n"
-      "  out=$('%s' exec --path '%s' \"$@\" 2>/dev/tty)\n"
-      "  if [ $? -eq 0 ]; then\n"
-      "    eval \"$out\"\n"
-      "  else\n"
+      "  out=$('%s' exec --path '%s' \"$@\" 2>/dev/tty) || {\n"
       "    echo \"$out\"\n"
-      "  fi\n"
+      "    return $?\n"
+      "  }\n"
+      "  eval \"$out\"\n"
       "}\n",
       self_path, tries_path);
   }
