@@ -71,7 +71,6 @@ static void emergency_cleanup(void) {
  * Signal handler for abnormal termination (SIGINT, SIGTERM, SIGABRT)
  */
 static void handle_signal(int sig) {
-  emergency_cleanup();
   exit(128 + sig);  // Standard convention for signal termination
 }
 
