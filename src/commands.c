@@ -170,30 +170,15 @@ static zstr make_clone_dirname(const char *url, const char *name) {
 // Script builders
 // ============================================================================
 
-static zstr build_cd_script(const char *path) {
-  zstr script = zstr_init();
-  zstr_fmt(&script, "touch '%s' && \\\n", path);
-  zstr_fmt(&script, "  cd '%s'\n", path);
-  return script;
-}
-
-static zstr build_mkdir_script(const char *path) {
-  zstr script = zstr_init();
-  zstr_fmt(&script, "mkdir -p '%s' && \\\n", path);
-  zstr_fmt(&script, "  cd '%s'\n", path);
-  return script;
-}
-
-static zstr build_clone_script(const char *url, const char *path) {
-  zstr script = zstr_init();
-  zstr_fmt(&script, "git clone '%s' '%s' && \\\n", url, path);
-  zstr_fmt(&script, "  cd '%s'\n", path);
-  return script;
-}
-
-// Escape single quotes for shell: ' becomes '"'"'
+// Shell-safe quoting based on Python's shlex.quote(). Single quotes protect
+// ALL characters in POSIX shells except ' itself, which we escape as '"'"'.
 static zstr shell_escape(const char *str) {
   zstr result = zstr_init();
+
+  // Opening quote
+  zstr_push(&result, '\'');
+
+  // Copy string, escaping single quotes
   for (const char *p = str; *p; p++) {
     if (*p == '\'') {
       zstr_cat(&result, "'\"'\"'");
@@ -201,7 +186,35 @@ static zstr shell_escape(const char *str) {
       zstr_push(&result, *p);
     }
   }
+
+  // Closing quote
+  zstr_push(&result, '\'');
   return result;
+}
+
+static zstr build_cd_script(const char *path) {
+  zstr script = zstr_init();
+  Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(path);
+  zstr_fmt(&script, "touch %s && \\\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
+  return script;
+}
+
+static zstr build_mkdir_script(const char *path) {
+  zstr script = zstr_init();
+  Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(path);
+  zstr_fmt(&script, "mkdir -p %s && \\\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
+  return script;
+}
+
+static zstr build_clone_script(const char *url, const char *path) {
+  zstr script = zstr_init();
+  Z_CLEANUP(zstr_free) zstr escaped_url = shell_escape(url);
+  Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(path);
+  zstr_fmt(&script, "git clone %s %s && \\\n", zstr_cstr(&escaped_url), zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
+  return script;
 }
 
 static zstr build_delete_script(const char *base_path, char **names, size_t count) {
@@ -213,21 +226,21 @@ static zstr build_delete_script(const char *base_path, char **names, size_t coun
     cwd[0] = '\0';
   }
 
-  // cd to base path first (escape quotes in path)
+  // cd to base path first
   Z_CLEANUP(zstr_free) zstr escaped_base = shell_escape(base_path);
-  zstr_fmt(&script, "cd '%s' && \\\n", zstr_cstr(&escaped_base));
+  zstr_fmt(&script, "cd %s && \\\n", zstr_cstr(&escaped_base));
 
   // Per-item delete commands
   for (size_t i = 0; i < count; i++) {
     Z_CLEANUP(zstr_free) zstr escaped_name = shell_escape(names[i]);
-    zstr_fmt(&script, "  [[ -d '%s' ]] && rm -rf '%s' && \\\n",
+    zstr_fmt(&script, "  [[ -d %s ]] && rm -rf %s && \\\n",
              zstr_cstr(&escaped_name), zstr_cstr(&escaped_name));
   }
 
   // PWD restoration
   if (cwd[0] != '\0') {
     Z_CLEANUP(zstr_free) zstr escaped_cwd = shell_escape(cwd);
-    zstr_fmt(&script, "  ( cd '%s' 2>/dev/null || cd \"$HOME\" )\n", zstr_cstr(&escaped_cwd));
+    zstr_fmt(&script, "  ( cd %s 2>/dev/null || cd \"$HOME\" )\n", zstr_cstr(&escaped_cwd));
   } else {
     zstr_cat(&script, "  cd \"$HOME\"\n");
   }
@@ -271,7 +284,7 @@ void cmd_init(int argc, char **argv, const char *tries_path) {
 #endif
 
   // Resolve to absolute path, handling symlinks
-  char *self_path;
+  const char *self_path;
   if (got_path && realpath(exe_path, resolved_path) != NULL) {
     self_path = resolved_path;
   } else {
@@ -279,27 +292,31 @@ void cmd_init(int argc, char **argv, const char *tries_path) {
     self_path = "command try";
   }
 
+  // Escape paths to prevent shell injection
+  Z_CLEANUP(zstr_free) zstr escaped_self = shell_escape(self_path);
+  Z_CLEANUP(zstr_free) zstr escaped_tries = shell_escape(tries_path);
+
   if (is_fish) {
     // Fish shell version
     printf(
       "function try\n"
-      "  set -l out ('%s' exec --path '%s' $argv 2>/dev/tty)\n"
+      "  set -l out (%s exec --path %s $argv 2>/dev/tty)\n"
       "  or begin; echo $out; return $status; end\n"
       "  eval $out\n"
       "end\n",
-      self_path, tries_path);
+      zstr_cstr(&escaped_self), zstr_cstr(&escaped_tries));
   } else {
     // Bash/Zsh version
     printf(
       "try() {\n"
       "  local out\n"
-      "  out=$('%s' exec --path '%s' \"$@\" 2>/dev/tty) || {\n"
+      "  out=$(%s exec --path %s \"$@\" 2>/dev/tty) || {\n"
       "    echo \"$out\"\n"
       "    return $?\n"
       "  }\n"
       "  eval \"$out\"\n"
       "}\n",
-      self_path, tries_path);
+      zstr_cstr(&escaped_self), zstr_cstr(&escaped_tries));
   }
 }
 
@@ -329,8 +346,9 @@ int cmd_clone(int argc, char **argv, const char *tries_path, Mode *mode) {
 
 static zstr build_worktree_script(const char *worktree_path) {
   zstr script = zstr_init();
-  zstr_fmt(&script, "git worktree add '%s' && \\\n", worktree_path);
-  zstr_fmt(&script, "  cd '%s'\n", worktree_path);
+  Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(worktree_path);
+  zstr_fmt(&script, "git worktree add %s && \\\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
   return script;
 }
 
