@@ -6,6 +6,9 @@ dist/
 *.out
 *.exe
 tui_output.txt
+*.zstd
+pkg/
+dist/
 
 # Object files directory
 obj/
