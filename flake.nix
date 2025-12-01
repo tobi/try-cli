@@ -58,7 +58,7 @@
       perSystem = { config, self', inputs', pkgs, system, ... }: {
         packages.default = pkgs.stdenv.mkDerivation {
           pname = "try";
-          version = "1.2.2";
+          version = "1.2.5";
 
           src = inputs.self;
 
