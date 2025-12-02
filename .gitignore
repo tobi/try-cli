@@ -39,6 +39,7 @@ spec/*
 !spec/.gitkeep
 !spec/README.md
 !spec/get_specs.sh
+!spec/token_system.md
 
 # Core dumps
 core
