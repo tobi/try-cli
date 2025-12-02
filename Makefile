@@ -33,20 +33,17 @@ clean:
 install: $(BIN)
 	install -m 755 $(BIN) /usr/local/bin/try
 
-# Clone try repo for specs if not present, otherwise pull latest
-spec/try:
-	git clone https://github.com/tobi/try spec/try
-
-spec-update: spec/try
-	cd spec/try && git pull
+# Fetch specs (clones if needed, pulls latest, creates upstream symlink)
+spec-update:
+	@./spec/get_specs.sh
 
 test-fast: $(BIN) spec-update
 	@echo "Running spec tests..."
-	spec/try/spec/tests/runner.sh ./dist/try
+	spec/upstream/tests/runner.sh ./dist/try
 
 test-valgrind: $(BIN) spec-update
 	@echo "Running spec tests under valgrind..."
-	spec/try/spec/tests/runner.sh "valgrind -q --leak-check=full ./dist/try"
+	spec/upstream/tests/runner.sh "valgrind -q --leak-check=full ./dist/try"
 
 test: test-fast
 	@command -v valgrind >/dev/null 2>&1 && $(MAKE) test-valgrind || echo "Skipping valgrind tests (valgrind not installed)"

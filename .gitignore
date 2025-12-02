@@ -38,6 +38,7 @@ valgrind-*.log
 spec/*
 !spec/.gitkeep
 !spec/README.md
+!spec/get_specs.sh
 
 # Core dumps
 core
