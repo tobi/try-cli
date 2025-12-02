@@ -58,4 +58,13 @@ bool file_exists(const char *path);
 int mkdir_p(const char *path);
 zstr format_relative_time(time_t mtime);
 
+// Directory name validation
+// Returns normalized name (spaces -> hyphens, collapse multiples, strip edges)
+// Returns empty string if name contains invalid characters
+// Valid chars: [a-zA-Z0-9_.-]
+zstr normalize_dir_name(const char *name);
+
+// Check if name contains only valid directory name characters
+bool is_valid_dir_name(const char *name);
+
 #endif // UTILS_H

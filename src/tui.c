@@ -856,7 +856,13 @@ SelectionResult run_selector(const char *base_path,
         result.type = ACTION_CD;
         result.path = zstr_dup(&filtered_ptrs.data[selected_index]->path);
       } else {
-        // Create new
+        // Create new - validate and normalize name first
+        Z_CLEANUP(zstr_free) zstr normalized = normalize_dir_name(zstr_cstr(&filter_buffer));
+        if (zstr_len(&normalized) == 0) {
+          // Invalid name - don't create directory
+          break;
+        }
+
         time_t now = time(NULL);
         struct tm *t = localtime(&now);
         char date_prefix[20];
@@ -864,14 +870,7 @@ SelectionResult run_selector(const char *base_path,
 
         zstr new_name = zstr_from(date_prefix);
         zstr_cat(&new_name, "-");
-        zstr_cat(&new_name, zstr_cstr(&filter_buffer));
-
-        // Replace spaces with dashes
-        char *new_name_data = zstr_data(&new_name);
-        for (size_t i = 0; i < zstr_len(&new_name); i++) {
-          if (isspace(new_name_data[i]))
-            new_name_data[i] = '-';
-        }
+        zstr_cat(&new_name, zstr_cstr(&normalized));
 
         result.type = ACTION_MKDIR;
         result.path = join_path(base_path, zstr_cstr(&new_name));

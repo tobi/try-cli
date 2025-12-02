@@ -232,3 +232,69 @@ zstr format_relative_time(time_t mtime) {
   }
   return s;
 }
+
+// Check if a character is valid for directory names
+// Valid: alphanumeric, underscore, hyphen, dot
+static bool is_valid_dir_char(char c) {
+  return isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.';
+}
+
+// Check if name contains only valid directory name characters
+// (after normalization, so no spaces)
+bool is_valid_dir_name(const char *name) {
+  if (!name || !*name) return false;
+
+  for (const char *p = name; *p; p++) {
+    if (!is_valid_dir_char(*p) && *p != ' ') {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Normalize directory name:
+// - Convert spaces to hyphens
+// - Collapse multiple consecutive hyphens to single hyphen
+// - Strip leading/trailing hyphens and spaces
+// - Return empty string if invalid characters found
+zstr normalize_dir_name(const char *name) {
+  zstr result = zstr_init();
+  if (!name || !*name) return result;
+
+  // First pass: check for invalid characters
+  for (const char *p = name; *p; p++) {
+    char c = *p;
+    if (!is_valid_dir_char(c) && !isspace((unsigned char)c)) {
+      // Invalid character found - return empty string
+      return result;
+    }
+  }
+
+  // Second pass: normalize
+  bool last_was_hyphen = true;  // Start true to strip leading hyphens/spaces
+  for (const char *p = name; *p; p++) {
+    char c = *p;
+    if (isspace((unsigned char)c) || c == '-') {
+      // Convert space to hyphen, collapse multiple hyphens
+      if (!last_was_hyphen) {
+        zstr_push(&result, '-');
+        last_was_hyphen = true;
+      }
+    } else {
+      zstr_push(&result, c);
+      last_was_hyphen = false;
+    }
+  }
+
+  // Strip trailing hyphen
+  while (zstr_len(&result) > 0) {
+    char *data = zstr_data(&result);
+    if (data[zstr_len(&result) - 1] == '-') {
+      zstr_pop_char(&result);
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
