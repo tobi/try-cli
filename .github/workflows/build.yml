@@ -1,40 +1,77 @@
-name: Build and Test
+name: Release
 
 on:
   push:
-    branches: [ main, master ]
     tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }} ${{ matrix.arch }}
+  test:
+    name: Test ${{ matrix.os }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
 
     strategy:
       matrix:
         include:
-          # Linux x86_64
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-latest
+
+          - os: linux
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+
+          - os: darwin
+            arch: x86_64
+            runner: macos-13
+
+          - os: darwin
+            arch: aarch64
+            runner: macos-14
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies (Linux)
+      if: matrix.os == 'linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ragel valgrind
+
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'darwin'
+      run: brew install ragel
+
+    - name: Build
+      run: make
+
+    - name: Run tests
+      run: make test
+
+  build:
+    name: Build ${{ matrix.os }} ${{ matrix.arch }}
+    needs: test
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
           - os: linux
             arch: x86_64
             runner: ubuntu-latest
             cc: gcc
 
-          # Linux ARM64 (cross-compile)
           - os: linux
             arch: aarch64
             runner: ubuntu-latest
             cc: aarch64-linux-gnu-gcc
             cross: true
 
-          # macOS x86_64
           - os: darwin
             arch: x86_64
             runner: macos-13
             cc: clang
 
-          # macOS ARM64 (Apple Silicon)
           - os: darwin
             arch: aarch64
             runner: macos-14
@@ -48,20 +85,20 @@ jobs:
       if: matrix.cross
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu
+        sudo apt-get install -y gcc-aarch64-linux-gnu ragel
+
+    - name: Install dependencies (Linux)
+      if: matrix.os == 'linux' && !matrix.cross
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ragel
+
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'darwin'
+      run: brew install ragel
 
     - name: Build
       run: make CC=${{ matrix.cc }}
-
-    - name: Verify binary
-      if: ${{ !matrix.cross }}
-      run: |
-        file ./dist/try
-        ./dist/try --help 2>&1 | head -5
-
-    - name: Run tests
-      if: ${{ !matrix.cross }}
-      run: make test
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
@@ -74,7 +111,6 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
@@ -105,3 +141,24 @@ jobs:
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  aur-publish:
+    name: Publish to AUR
+    needs: release
+    runs-on: ubuntu-latest
+    environment: OpenSource
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Publish to AUR
+      uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+      with:
+        pkgname: try-cli
+        pkgbuild: ./PKGBUILD
+        commit_username: ${{ secrets.AUR_USERNAME }}
+        commit_email: ${{ secrets.AUR_EMAIL }}
+        ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        commit_message: "Update to ${{ github.ref_name }}"
+        force_push: true

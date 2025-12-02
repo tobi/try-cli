@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Test ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-latest
+
+          - os: linux
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+
+          - os: darwin
+            arch: x86_64
+            runner: macos-13
+
+          - os: darwin
+            arch: aarch64
+            runner: macos-14
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies (Linux)
+      if: matrix.os == 'linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ragel valgrind
+
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'darwin'
+      run: brew install ragel
+
+    - name: Build
+      run: make
+
+    - name: Run tests
+      run: make test
