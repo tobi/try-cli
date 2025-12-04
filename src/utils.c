@@ -17,8 +17,6 @@
 #include <time.h>
 #include <unistd.h>
 
-// Token expansion is now in tokens.c (generated from tokens.rl)
-
 char *trim(char *str) {
   char *end;
   while (isspace((unsigned char)*str))

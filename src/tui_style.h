@@ -123,6 +123,13 @@ typedef struct {
   TuiStyles styles;
 } TuiStyleString;
 
+// Text input field state (forward declare)
+typedef struct {
+  zstr text;
+  int cursor;
+  const char *placeholder;  // Optional placeholder shown when empty
+} TuiInput;
+
 typedef struct {
   FILE *file;
   zstr line_buf;
@@ -130,6 +137,7 @@ typedef struct {
   int cursor_row;
   int cursor_col;
   bool line_has_selection;
+  TuiInput *active_input;  // Input field with cursor (if any)
 } Tui;
 
 // ============================================================================
@@ -157,7 +165,16 @@ void tui_screen_write(Tui *t, TuiStyleString *line);
 void tui_screen_empty(Tui *t);
 void tui_screen_clear_rest(Tui *t);
 void tui_end_screen(Tui *t);
-void tui_screen_input(Tui *t, const char *text, int cursor_pos);
+void tui_screen_input(Tui *t, TuiInput *input);
+
+// Input field management
+TuiInput tui_input_init(void);
+void tui_input_free(TuiInput *input);
+void tui_input_clear(TuiInput *input);
+bool tui_input_handle_key(TuiInput *input, int key);
+
+// Convenience: handle key for active input on screen
+bool tui_handle_key(Tui *t, int key);
 
 void tui_clr(zstr *s);
 void tui_zstr_printf(zstr *s, const char *style, const char *text);

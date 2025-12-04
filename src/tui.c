@@ -31,8 +31,7 @@ Z_VEC_GENERATE_IMPL(TryEntry *, TryEntryPtr)
 
 static vec_TryEntry all_tries = {0};
 static vec_TryEntryPtr filtered_ptrs = {0};
-static zstr filter_buffer = {0};
-static int filter_cursor = 0;  // Cursor position in filter_buffer
+static TuiInput filter_input = {0};
 static int selected_index = 0;
 static int scroll_offset = 0;
 static int marked_count = 0;  // Number of items marked for deletion
@@ -65,8 +64,6 @@ static void clear_state(void) {
 
   // filtered_ptrs just contains pointers, no need to free entries
   vec_free_TryEntryPtr(&filtered_ptrs);
-
-  filter_cursor = 0;
 }
 
 static int compare_tries_by_score(const void *a, const void *b) {
@@ -117,7 +114,7 @@ static void scan_tries(const char *base_path) {
 
 static void filter_tries(void) {
   vec_clear_TryEntryPtr(&filtered_ptrs);
-  const char *query = zstr_cstr(&filter_buffer);
+  const char *query = zstr_cstr(&filter_input.text);
 
   TryEntry *iter;
   vec_foreach(&all_tries, iter) {
@@ -126,7 +123,7 @@ static void filter_tries(void) {
     // Update score and rendered string
     fuzzy_match(entry, query);
 
-    if (zstr_len(&filter_buffer) > 0 && entry->score <= 0.0) {
+    if (zstr_len(&filter_input.text) > 0 && entry->score <= 0.0) {
       continue;
     }
 
@@ -139,89 +136,6 @@ static void filter_tries(void) {
   if (selected_index >= (int)filtered_ptrs.length) {
     selected_index = 0;
   }
-}
-
-// Handle readline-style keybindings for text editing
-// Returns true if the key was handled, false if it should be treated as regular input
-static bool handle_readline_keybinding(zstr *buffer, int *cursor, int key) {
-  if (key == 1) {  // Ctrl-A (move to start)
-    *cursor = 0;
-    return true;
-  } else if (key == 5) {  // Ctrl-E (move to end)
-    *cursor = (int)zstr_len(buffer);
-    return true;
-  } else if (key == 2 || key == ARROW_LEFT) {  // Ctrl-B or LEFT (move left)
-    if (*cursor > 0)
-      (*cursor)--;
-    return true;
-  } else if (key == 6 || key == ARROW_RIGHT) {  // Ctrl-F or RIGHT (move right)
-    if (*cursor < (int)zstr_len(buffer))
-      (*cursor)++;
-    return true;
-  } else if (key == 11) {  // Ctrl-K (kill after cursor)
-    int buffer_len = (int)zstr_len(buffer);
-    if (*cursor < buffer_len) {
-      char *data = zstr_data(buffer);
-      Z_CLEANUP(zstr_free) zstr new_buffer = zstr_init();
-      for (int i = 0; i < *cursor; i++) {
-        zstr_push(&new_buffer, data[i]);
-      }
-      zstr_free(buffer);
-      *buffer = new_buffer;
-    }
-    return true;
-  } else if (key == 23) {  // Ctrl-W (kill word)
-    int buffer_len = (int)zstr_len(buffer);
-    if (*cursor > 0) {
-      char *data = zstr_data(buffer);
-
-      // Move back past any trailing non-word characters
-      int end_pos = *cursor - 1;
-      while (end_pos >= 0 && !isalnum((unsigned char)data[end_pos])) {
-        end_pos--;
-      }
-
-      // Move back past the word itself (alphanumeric characters)
-      int start_pos = end_pos;
-      while (start_pos >= 0 && isalnum((unsigned char)data[start_pos])) {
-        start_pos--;
-      }
-      start_pos++;  // Move to the first char of the word
-
-      // Build new buffer without the deleted word
-      Z_CLEANUP(zstr_free) zstr new_buffer = zstr_init();
-      for (int i = 0; i < start_pos; i++) {
-        zstr_push(&new_buffer, data[i]);
-      }
-      for (int i = *cursor; i < buffer_len; i++) {
-        zstr_push(&new_buffer, data[i]);
-      }
-
-      zstr_free(buffer);
-      *buffer = new_buffer;
-      *cursor = start_pos;
-    }
-    return true;
-  } else if (key == BACKSPACE || key == 127 || key == 8) {  // Backspace, DEL, or Ctrl-H
-    if (*cursor > 0) {
-      // Delete character before cursor
-      int buffer_len = (int)zstr_len(buffer);
-      Z_CLEANUP(zstr_free) zstr new_buffer = zstr_init();
-      char *data = zstr_data(buffer);
-
-      for (int i = 0; i < buffer_len; i++) {
-        if (i != *cursor - 1) {  // Skip the character before cursor
-          zstr_push(&new_buffer, data[i]);
-        }
-      }
-
-      zstr_free(buffer);
-      *buffer = new_buffer;
-      (*cursor)--;
-    }
-    return true;
-  }
-  return false;
 }
 
 // Parse symbolic key name to key code
@@ -263,13 +177,13 @@ static int parse_symbolic_key(const char *token, int len) {
 // Supports both raw escape sequences AND symbolic format (comma-separated)
 // Symbolic: "CTRL-J,DOWN,ENTER" or "beta,ENTER"
 // Raw: "\x0a\x1b[B\r" (legacy)
-static int read_test_key(Mode *mode) {
-  if (mode->inject_keys[mode->key_index] == '\0') {
+static int read_test_key(TestParams *test) {
+  if (test->inject_keys[test->key_index] == '\0') {
     return -1; // End of keys
   }
 
-  const char *keys = mode->inject_keys;
-  int *idx = &mode->key_index;
+  const char *keys = test->inject_keys;
+  int *idx = &test->key_index;
 
   // Skip leading comma
   while (keys[*idx] == ',') (*idx)++;
@@ -334,9 +248,8 @@ static int read_test_key(Mode *mode) {
 
 // Render confirmation dialog for deletion
 // Returns true if user typed "YES", false otherwise
-static bool render_delete_confirmation(const char *base_path, Mode *mode) {
-  int rows, cols;
-  get_window_size(&rows, &cols);
+static bool render_delete_confirmation(const char *base_path, TestParams *test) {
+  (void)base_path;
 
   // Collect marked items
   vec_TryEntryPtr marked_items = {0};
@@ -346,155 +259,68 @@ static bool render_delete_confirmation(const char *base_path, Mode *mode) {
     }
   }
 
-  zstr confirm_input = zstr_init();
-  int confirm_cursor = 0;
+  TuiInput input = tui_input_init();
+  input.placeholder = "YES";
   bool confirmed = false;
-  bool is_test = (mode && mode->inject_keys);
+  bool is_test = (test && test->inject_keys);
+
+  int max_show = 10;
+  if (max_show > (int)marked_items.length) max_show = (int)marked_items.length;
 
   while (1) {
-    // Hide cursor and go home
-    tui_write_hide_cursor(stderr);
-    tui_write_home(stderr);
+    Tui t = tui_begin_screen(stderr);
 
     // Title
-    {
-      Z_CLEANUP(zstr_free) zstr title = zstr_init();
-      if (!tui_no_colors) zstr_cat(&title, TUI_BOLD);
-      zstr_cat(&title, "Delete ");
-      char count_str[32];
-      snprintf(count_str, sizeof(count_str), "%zu", marked_items.length);
-      zstr_cat(&title, count_str);
-      zstr_cat(&title, " director");
-      zstr_cat(&title, marked_items.length == 1 ? "y" : "ies");
-      zstr_cat(&title, "?");
-      if (!tui_no_colors) zstr_cat(&title, ANSI_RESET);
-      tui_clr(&title);
-      zstr_cat(&title, "\n");
-      tui_clr(&title);
-      zstr_cat(&title, "\n");
-      tui_flush(stderr, &title);
-    }
+    TuiStyleString line = tui_screen_line(&t);
+    tui_printf(&line, TUI_BOLD, "Delete %zu director%s?",
+               marked_items.length, marked_items.length == 1 ? "y" : "ies");
+    tui_screen_write(&t, &line);
+    tui_screen_empty(&t);
 
-    // List items (max 10)
-    int max_show = 10;
-    if (max_show > (int)marked_items.length) max_show = (int)marked_items.length;
+    // List items
     for (int i = 0; i < max_show; i++) {
-      Z_CLEANUP(zstr_free) zstr item = zstr_init();
-      zstr_cat(&item, "  ");
-      if (!tui_no_colors) zstr_cat(&item, TUI_DARK);
-      zstr_cat(&item, "-");
-      if (!tui_no_colors) zstr_cat(&item, ANSI_RESET);
-      zstr_cat(&item, " ");
-      zstr_cat(&item, zstr_cstr(&marked_items.data[i]->name));
-      tui_clr(&item);
-      zstr_cat(&item, "\n");
-      tui_flush(stderr, &item);
+      line = tui_screen_line(&t);
+      tui_print(&line, NULL, "  ");
+      tui_print(&line, TUI_DARK, "-");
+      tui_print(&line, NULL, " ");
+      tui_print(&line, NULL, zstr_cstr(&marked_items.data[i]->name));
+      tui_screen_write(&t, &line);
     }
     if ((int)marked_items.length > max_show) {
-      Z_CLEANUP(zstr_free) zstr more = zstr_init();
-      zstr_cat(&more, "  ");
-      if (!tui_no_colors) zstr_cat(&more, TUI_DARK);
-      char more_text[80];
-      snprintf(more_text, sizeof(more_text), "...and %zu more", marked_items.length - max_show);
-      zstr_cat(&more, more_text);
-      if (!tui_no_colors) zstr_cat(&more, ANSI_RESET);
-      tui_clr(&more);
-      zstr_cat(&more, "\n");
-      tui_flush(stderr, &more);
+      line = tui_screen_line(&t);
+      tui_printf(&line, TUI_DARK, "  ...and %zu more", marked_items.length - max_show);
+      tui_screen_write(&t, &line);
     }
 
-    // Prompt line
-    {
-      Z_CLEANUP(zstr_free) zstr prompt = zstr_init();
-      tui_clr(&prompt);
-      zstr_cat(&prompt, "\n");
-      if (!tui_no_colors) zstr_cat(&prompt, TUI_DARK);
-      zstr_cat(&prompt, "Type ");
-      if (!tui_no_colors) zstr_cat(&prompt, ANSI_RESET);
-      if (!tui_no_colors) zstr_cat(&prompt, TUI_HIGHLIGHT);
-      zstr_cat(&prompt, "YES");
-      if (!tui_no_colors) zstr_cat(&prompt, ANSI_RESET);
-      if (!tui_no_colors) zstr_cat(&prompt, TUI_DARK);
-      zstr_cat(&prompt, " to confirm:");
-      if (!tui_no_colors) zstr_cat(&prompt, ANSI_RESET);
-      zstr_cat(&prompt, " ");
+    // Prompt line with input
+    tui_screen_empty(&t);
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, "Type ");
+    tui_print(&line, TUI_HIGHLIGHT, "YES");
+    tui_print(&line, TUI_DARK, " to confirm: ");
+    tui_screen_input(&t, &input);
+    tui_clr(line.str);  // Cut off overflow
+    tui_screen_write(&t, &line);
 
-      // Calculate cursor column: "Type YES to confirm: " + input before cursor
-      // "Type YES to confirm: " is 21 visible chars
-      int prompt_len = 21;
-
-      const char *confirm_cstr = zstr_cstr(&confirm_input);
-      int confirm_len = (int)zstr_len(&confirm_input);
-
-      // Clamp cursor to valid range
-      int cursor = confirm_cursor;
-      if (cursor < 0) cursor = 0;
-      if (cursor > confirm_len) cursor = confirm_len;
-
-      // Add text before cursor
-      zstr_cat_len(&prompt, confirm_cstr, cursor);
-
-      // Remember cursor position (1-indexed)
-      int cursor_col = prompt_len + cursor + 1;
-
-      // Add text after cursor
-      zstr_cat_len(&prompt, confirm_cstr + cursor, confirm_len - cursor);
-
-      zstr_cat(&prompt, "\n");
-      zstr_cat(&prompt, ANSI_CLS);
-      tui_flush(stderr, &prompt);
-
-      // Position cursor and show it
-      tui_write_goto(stderr, 4 + max_show + ((int)marked_items.length > max_show ? 1 : 0), cursor_col);
-      tui_write_show_cursor(stderr);
-    }
+    tui_end_screen(&t);
 
     // Read key
-    int c;
-    if (is_test) {
-      c = read_test_key(mode);
-    } else {
-      c = read_key();
-    }
+    int c = is_test ? read_test_key(test) : read_key();
 
     if (c == -1 || c == ESC_KEY || c == 3) {
       break;
     } else if (c == ENTER_KEY) {
-      // Check if input is exactly "YES"
-      if (strcmp(zstr_cstr(&confirm_input), "YES") == 0) {
+      if (strcmp(zstr_cstr(&input.text), "YES") == 0) {
         confirmed = true;
       }
       break;
-    } else if (handle_readline_keybinding(&confirm_input, &confirm_cursor, c)) {
-      // Keybinding was handled
-    } else if (!iscntrl(c) && c < 128) {
-      // Insert character at cursor position
-      int buffer_len = (int)zstr_len(&confirm_input);
-      Z_CLEANUP(zstr_free) zstr new_buffer = zstr_init();
-      char *data = zstr_data(&confirm_input);
-
-      for (int i = 0; i < buffer_len; i++) {
-        if (i == confirm_cursor) {
-          zstr_push(&new_buffer, (char)c);
-        }
-        zstr_push(&new_buffer, data[i]);
-      }
-
-      // If cursor is at the end, just append
-      if (confirm_cursor >= buffer_len) {
-        zstr_push(&new_buffer, (char)c);
-      }
-
-      zstr_free(&confirm_input);
-      confirm_input = new_buffer;
-      confirm_cursor++;
+    } else {
+      tui_input_handle_key(&input, c);
     }
   }
 
   vec_free_TryEntryPtr(&marked_items);
-  zstr_free(&confirm_input);
-
-  (void)base_path;
+  tui_input_free(&input);
   return confirmed;
 }
 
@@ -540,11 +366,11 @@ static void render(const char *base_path) {
     // Calculate visual position: "Search: " is 8 chars
     int prefix_visual_len = 8;
 
-    const char *filter_cstr = zstr_cstr(&filter_buffer);
-    int buffer_len = (int)zstr_len(&filter_buffer);
+    const char *filter_cstr = zstr_cstr(&filter_input.text);
+    int buffer_len = (int)zstr_len(&filter_input.text);
 
     // Clamp cursor to valid range
-    int cursor = filter_cursor;
+    int cursor = filter_input.cursor;
     if (cursor < 0) cursor = 0;
     if (cursor > buffer_len) cursor = buffer_len;
 
@@ -734,7 +560,7 @@ static void render(const char *base_path) {
       zstr_cat(&line, "\n");
       tui_flush(stderr, &line);
 
-    } else if (idx == (int)filtered_ptrs.length && zstr_len(&filter_buffer) > 0) {
+    } else if (idx == (int)filtered_ptrs.length && zstr_len(&filter_input.text) > 0) {
       // Add separator line before "Create new"
       tui_write_clr(stderr);
       fputs("\n", stderr);
@@ -750,8 +576,8 @@ static void render(const char *base_path) {
       zstr_cat(&preview, "-");
 
       // Add filter text with spaces replaced by dashes
-      const char *filter_text = zstr_cstr(&filter_buffer);
-      for (size_t j = 0; j < zstr_len(&filter_buffer); j++) {
+      const char *filter_text = zstr_cstr(&filter_input.text);
+      for (size_t j = 0; j < zstr_len(&filter_input.text); j++) {
         if (isspace(filter_text[j])) {
           zstr_push(&preview, '-');
         } else {
@@ -838,36 +664,33 @@ static void render(const char *base_path) {
 
 SelectionResult run_selector(const char *base_path,
                              const char *initial_filter,
-                             Mode *mode) {
-  // Initialize
-  if (zstr_len(&filter_buffer) == 0 && !filter_buffer.is_long) {
-    // First time - already zero-initialized
-    filter_buffer = zstr_init();
+                             TestParams *test) {
+  // Initialize filter input
+  if (zstr_len(&filter_input.text) == 0 && !filter_input.text.is_long) {
+    filter_input = tui_input_init();
   } else {
-    zstr_clear(&filter_buffer);
+    tui_input_clear(&filter_input);
   }
 
-  filter_cursor = 0;
-
   if (initial_filter) {
-    zstr_cat(&filter_buffer, initial_filter);
-    filter_cursor = (int)zstr_len(&filter_buffer);  // Move cursor to end after initial filter
+    zstr_cat(&filter_input.text, initial_filter);
+    filter_input.cursor = (int)zstr_len(&filter_input.text);
   }
 
   scan_tries(base_path);
   filter_tries();
 
-  bool is_test = (mode && (mode->render_once || mode->inject_keys));
+  bool is_test = (test && (test->render_once || test->inject_keys));
 
   // Test mode: render once and exit
-  if (is_test && mode->render_once) {
+  if (is_test && test->render_once) {
     render(base_path);
     SelectionResult result = {.type = ACTION_CANCEL, .path = zstr_init()};
     return result;
   }
 
   // Only setup TTY if not in test mode or if we need to read keys
-  if (!is_test || !mode->inject_keys) {
+  if (!is_test || !test->inject_keys) {
     enable_raw_mode();
 
     struct sigaction sa;
@@ -884,14 +707,14 @@ SelectionResult run_selector(const char *base_path,
   SelectionResult result = {.type = ACTION_CANCEL, .path = zstr_init()};
 
   while (1) {
-    if (!is_test || !mode->inject_keys) {
+    if (!is_test || !test->inject_keys) {
       render(base_path);
     }
 
     // Read key from injected keys or real input
     int c;
-    if (is_test && mode->inject_keys) {
-      c = read_test_key(mode);
+    if (is_test && test->inject_keys) {
+      c = read_test_key(test);
     } else {
       c = read_key();
     }
@@ -928,7 +751,7 @@ SelectionResult run_selector(const char *base_path,
     } else if (c == ENTER_KEY) {
       // If items are marked, show confirmation dialog
       if (marked_count > 0) {
-        bool confirmed = render_delete_confirmation(base_path, mode);
+        bool confirmed = render_delete_confirmation(base_path, test);
         if (confirmed) {
           // Collect all marked paths
           result.type = ACTION_DELETE;
@@ -949,7 +772,7 @@ SelectionResult run_selector(const char *base_path,
         result.path = zstr_dup(&filtered_ptrs.data[selected_index]->path);
       } else {
         // Create new - validate and normalize name first
-        Z_CLEANUP(zstr_free) zstr normalized = normalize_dir_name(zstr_cstr(&filter_buffer));
+        Z_CLEANUP(zstr_free) zstr normalized = normalize_dir_name(zstr_cstr(&filter_input.text));
         if (zstr_len(&normalized) == 0) {
           // Invalid name - don't create directory
           break;
@@ -974,39 +797,17 @@ SelectionResult run_selector(const char *base_path,
         selected_index--;
     } else if (c == ARROW_DOWN || c == 14) {  // DOWN or Ctrl-N
       int max_idx = filtered_ptrs.length;
-      if (zstr_len(&filter_buffer) > 0)
+      if (zstr_len(&filter_input.text) > 0)
         max_idx++;
       if (selected_index < max_idx - 1)
         selected_index++;
-    } else if (handle_readline_keybinding(&filter_buffer, &filter_cursor, c)) {
-      // Readline keybinding was handled - re-filter if buffer changed
-      filter_tries();
-    } else if (!iscntrl(c) && c < 128) {
-      // Insert character at cursor position
-      int buffer_len = (int)zstr_len(&filter_buffer);
-      Z_CLEANUP(zstr_free) zstr new_buffer = zstr_init();
-      char *data = zstr_data(&filter_buffer);
-
-      for (int i = 0; i < buffer_len; i++) {
-        if (i == filter_cursor) {
-          zstr_push(&new_buffer, (char)c);
-        }
-        zstr_push(&new_buffer, data[i]);
-      }
-
-      // If cursor is at the end, just append
-      if (filter_cursor >= buffer_len) {
-        zstr_push(&new_buffer, (char)c);
-      }
-
-      zstr_free(&filter_buffer);
-      filter_buffer = new_buffer;
-      filter_cursor++;
+    } else if (tui_input_handle_key(&filter_input, c)) {
+      // Input was handled - re-filter
       filter_tries();
     }
   }
 
-  if (!is_test || !mode->inject_keys) {
+  if (!is_test || !test->inject_keys) {
     // Disable alternate screen buffer (restores original screen)
     disable_alternate_screen();
     // Reset terminal state
@@ -1018,7 +819,7 @@ SelectionResult run_selector(const char *base_path,
 
   clear_state();
   vec_free_TryEntryPtr(&filtered_ptrs);
-  zstr_free(&filter_buffer);
+  tui_input_free(&filter_input);
   marked_count = 0;
 
   return result;

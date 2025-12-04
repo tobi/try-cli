@@ -46,6 +46,11 @@ static struct termios orig_termios;
 static int raw_mode_enabled = 0;
 static int alternate_screen_enabled = 0;
 
+// Window size cache
+static int cached_rows = 0;
+static int cached_cols = 0;
+static int window_size_valid = 0;
+
 /*
  * Emergency cleanup - called on signal or atexit
  * Ensures terminal is always restored even on abnormal exit
@@ -137,8 +142,10 @@ int read_key(void) {
     if (nread == -1) {
       if (errno == EAGAIN)
         continue;
-      if (errno == EINTR)
+      if (errno == EINTR) {
+        window_size_valid = 0; // Invalidate cache on resize
         return KEY_RESIZE; // Signal interrupted read (likely SIGWINCH)
+      }
       return -1;
     }
     if (nread == 0) {
@@ -182,6 +189,39 @@ int read_key(void) {
     tcsetattr(STDIN_FILENO, TCSANOW, &original_state);
 
     if (seq[0] == '[') {
+      // SGR mouse: \x1b[<Ps;Ps;PsM or \x1b[<Ps;Ps;Psm
+      if (seq[1] == '<') {
+        char discard;
+        // Consume until 'M' or 'm' (mouse button release/press)
+        while (read(STDIN_FILENO, &discard, 1) == 1) {
+          if (discard == 'M' || discard == 'm')
+            break;
+        }
+        return KEY_UNKNOWN;
+      }
+      // X10 mouse: \x1b[M followed by 3 bytes
+      if (seq[1] == 'M') {
+        char discard[3];
+        read(STDIN_FILENO, discard, 3);  // Consume button + coordinates
+        return KEY_UNKNOWN;
+      }
+      // Simple arrow keys and similar
+      switch (seq[1]) {
+      case 'A':
+        return ARROW_UP;
+      case 'B':
+        return ARROW_DOWN;
+      case 'C':
+        return ARROW_RIGHT;
+      case 'D':
+        return ARROW_LEFT;
+      case 'H':
+        return HOME_KEY;
+      case 'F':
+        return END_KEY;
+      }
+      // Sequences starting with digit: \x1b[1~ (Home), \x1b[3~ (Del), etc.
+      // Also handles urxvt mouse: \x1b[96;32;15M
       if (seq[1] >= '0' && seq[1] <= '9') {
         if (read(STDIN_FILENO, &seq[2], 1) != 1)
           return KEY_UNKNOWN;
@@ -202,35 +242,23 @@ int read_key(void) {
           case '8':
             return END_KEY;
           }
-        }
-        // Extended sequence like \x1b[1;5B (Ctrl+Down) - consume rest and ignore
-        if (seq[2] == ';') {
-          char discard;
-          // Read modifier and final character (e.g., "5B")
-          while (read(STDIN_FILENO, &discard, 1) == 1) {
-            if (discard >= 'A' && discard <= 'Z')
-              break;
-            if (discard >= 'a' && discard <= 'z')
-              break;
-            if (discard == '~')
-              break;
-          }
           return KEY_UNKNOWN;
         }
-      } else {
-        switch (seq[1]) {
-        case 'A':
-          return ARROW_UP;
-        case 'B':
-          return ARROW_DOWN;
-        case 'C':
-          return ARROW_RIGHT;
-        case 'D':
-          return ARROW_LEFT;
-        case 'H':
-          return HOME_KEY;
-        case 'F':
-          return END_KEY;
+        // Any other CSI sequence starting with digit - consume until terminator
+        // CSI sequences end with a byte in range 0x40-0x7E (@ through ~)
+        char last = seq[2];
+        while (!(last >= 0x40 && last <= 0x7E)) {
+          if (read(STDIN_FILENO, &last, 1) != 1)
+            break;
+        }
+        return KEY_UNKNOWN;
+      }
+      // Any other unrecognized CSI sequence - consume until terminator
+      if (!(seq[1] >= 0x40 && seq[1] <= 0x7E)) {
+        char last = seq[1];
+        while (!(last >= 0x40 && last <= 0x7E)) {
+          if (read(STDIN_FILENO, &last, 1) != 1)
+            break;
         }
       }
     } else if (seq[0] == 'O') {
@@ -248,6 +276,13 @@ int read_key(void) {
 }
 
 int get_window_size(int *rows, int *cols) {
+  // Return cached values if valid
+  if (window_size_valid) {
+    *rows = cached_rows;
+    *cols = cached_cols;
+    return 0;
+  }
+
   // Check TRY_WIDTH/TRY_HEIGHT env vars first (for testing)
   const char *env_width = getenv("TRY_WIDTH");
   const char *env_height = getenv("TRY_HEIGHT");
@@ -255,13 +290,13 @@ int get_window_size(int *rows, int *cols) {
     *cols = atoi(env_width);
     *rows = atoi(env_height);
     if (*cols > 0 && *rows > 0) {
-      return 0;
+      goto cache_and_return;
     }
   } else if (env_width) {
     *cols = atoi(env_width);
     if (*cols > 0) {
       *rows = 24;  // Default height
-      return 0;
+      goto cache_and_return;
     }
   }
 
@@ -271,7 +306,7 @@ int get_window_size(int *rows, int *cols) {
   if (ioctl(STDERR_FILENO, TIOCGWINSZ, &ws) != -1 && ws.ws_col != 0) {
     *cols = ws.ws_col;
     *rows = ws.ws_row;
-    return 0;
+    goto cache_and_return;
   }
 
   // 2. Try tput
@@ -283,7 +318,7 @@ int get_window_size(int *rows, int *cols) {
       if (fp) {
         if (fscanf(fp, "%d", rows) == 1) {
           pclose(fp);
-          return 0;
+          goto cache_and_return;
         }
         pclose(fp);
       }
@@ -295,6 +330,11 @@ int get_window_size(int *rows, int *cols) {
   // 3. Fallback defaults
   *cols = 80;
   *rows = 24;
+
+cache_and_return:
+  cached_rows = *rows;
+  cached_cols = *cols;
+  window_size_valid = 1;
   return 0;
 }
 

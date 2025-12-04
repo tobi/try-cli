@@ -96,7 +96,6 @@
             gnumake
             valgrind
             gdb
-            ragel  # For modifying src/tokens.rl
           ];
 
           shellHook = ''

@@ -35,20 +35,23 @@ The binary is built to `dist/try` from C source files in `src/`. Object files ar
 
 The tool uses a unique architecture where it emits shell commands that are sourced by the parent shell:
 
-1. User runs `try cd` or similar command
-2. The C binary executes and prints shell commands to stdout
-3. A shell wrapper function sources the output, executing it in the current shell context
-4. This allows the tool to change the current directory (impossible for normal subprocesses)
+1. User runs `try` or similar command
+2. The C binary executes and builds a shell script
+3. In exec mode: script is printed to stdout for the shell wrapper to eval
+4. In direct mode: script is executed via `system()`, with cd commands printed as hints
+5. This allows the tool to change the current directory (impossible for normal subprocesses)
 
-Commands are emitted via `emit_task()` in `src/commands.c`, which prints shell snippets chained with `&&`. Each command chain ends with `true\n`.
+Commands return shell scripts as `zstr` strings. The `run_script()` function either prints (exec mode) or executes (direct mode) the script.
 
 ### Core Components
 
 **Command Layer** (`src/commands.c`, `src/commands.h`):
 - `cmd_init()`: Prints shell function definition for integration
-- `cmd_clone()`: Generates shell commands to clone repo into dated directory
-- `cmd_cd()`: Launches interactive selector, emits cd command
-- `cmd_worktree()`: Placeholder (not implemented)
+- `cmd_clone()`: Returns shell script to clone repo into dated directory
+- `cmd_selector()`: Launches interactive selector, returns cd/mkdir script
+- `cmd_worktree()`: Returns shell script to create git worktree
+- `cmd_route()`: Routes subcommands for exec mode
+- `run_script()`: Executes or prints a shell script
 
 **Interactive TUI** (`src/tui.c`, `src/tui.h`):
 - `run_selector()`: Main interactive loop using raw terminal mode
@@ -56,10 +59,17 @@ Commands are emitted via `emit_task()` in `src/commands.c`, which prints shell s
 - Returns `SelectionResult` with action type and path
 - Supports fuzzy filtering and keyboard navigation
 
+**TUI Styling** (`src/tui_style.c`, `src/tui_style.h`):
+- ANSI escape code constants and semantic style aliases
+- `TuiStyleString`: Stack-based style management for proper nesting
+- `tui_push()`/`tui_pop()`: Push/pop styles with automatic targeted resets
+- `tui_print()`/`tui_printf()`: Styled text output
+- Screen API for full-screen TUI rendering
+
 **Fuzzy Matching** (`src/fuzzy.c`, `src/fuzzy.h`):
 - `fuzzy_match()`: Updates TryEntry score and rendered output in-place
 - `calculate_score()`: Combines fuzzy match score with recency (mtime)
-- `highlight_matches()`: Inserts `{highlight}` tokens around matched characters
+- `highlight_matches()`: Wraps matched characters with ANSI highlight codes
 - Algorithm favors consecutive character matches and recent access times
 - **Documentation**: See `spec/fuzzy_matching.md` for complete algorithm specification
 
@@ -68,12 +78,6 @@ Commands are emitted via `emit_task()` in `src/commands.c`, which prints shell s
 - Escape sequence parsing for arrow keys, special keys
 - Window size detection
 - Cursor visibility control
-
-**Token System** (`src/tokens.rl`, `src/tokens.c`, `src/tokens.h`):
-- Ragel-based state machine for token expansion
-- Stack-based style nesting with `{/}` pop operation
-- Full color palette support (standard, bright, 256-color)
-- Control sequences for cursor and screen management
 
 **Utilities** (`src/utils.c`, `src/utils.h`):
 - Path utilities: `join_path()`, `mkdir_p()`, directory existence checks
@@ -102,69 +106,14 @@ Manual cleanup still required in some cases:
 
 ### Data Flow
 
-1. User invokes `try cd [query]`
+1. User invokes `try [query]`
 2. `main()` parses `--path` flag or uses default tries directory
-3. `cmd_cd()` calls `run_selector()` with optional initial filter
+3. `cmd_selector()` calls `run_selector()` with optional initial filter
 4. `run_selector()` scans directories with `scan_tries()`
 5. Interactive loop: user types to filter, arrows to navigate
 6. On Enter: returns `SelectionResult` with action and path
-7. `cmd_cd()` emits shell commands to cd to selected path
-8. Shell wrapper sources output, executing the cd command
-
-### Token System
-
-The UI uses a stack-based token formatting system implemented with [Ragel](https://www.colm.net/open-source/ragel/). Tokens are placeholder strings embedded in text that get expanded to ANSI escape codes via `zstr_expand_tokens()`. This allows formatting to be defined declaratively without hardcoding ANSI sequences throughout the codebase.
-
-**Implementation**: `src/tokens.rl` (Ragel source) generates `src/tokens.c`
-
-**Documentation**: See `spec/token_system.md` for complete token specifications and usage patterns.
-
-**Stack Semantics**: Each style token pushes its previous state onto a stack. `{/}` pops one level, restoring the previous state. This enables proper nesting of styles.
-
-**Key Features:**
-- **Deferred Emission**: ANSI codes only emit when an actual character is printed
-- **Redundancy Avoidance**: Repeated identical styles don't emit duplicate codes
-- **Auto-Reset at Newlines**: All styles automatically reset before each newline
-
-**Available Tokens:**
-
-| Category | Tokens |
-|----------|--------|
-| **Semantic** | `{b}` (bold), `{highlight}` (bold+yellow), `{h1}` (bold+orange), `{h2}` (bold+blue), `{dim}` (gray), `{section}` (bold), `{danger}` (red bg) |
-| **Attributes** | `{bold}` `{B}`, `{italic}` `{I}`, `{underline}` `{U}`, `{reverse}`, `{strikethrough}`, `{strike}` |
-| **Colors** | `{red}`, `{green}`, `{blue}`, `{yellow}`, `{cyan}`, `{magenta}`, `{white}`, `{black}`, `{gray}`/`{grey}` |
-| **Bright Colors** | `{bright:red}`, `{bright:green}`, etc. |
-| **256-Color** | `{fg:N}`, `{bg:N}` where N is 0-255 |
-| **Background** | `{bg:red}`, `{bg:green}`, etc. |
-| **Reset/Pop** | `{/}` (pop), `{/name}` (e.g., `{/highlight}`), `{reset}` (full reset), `{/fg}`, `{/bg}` |
-| **Control** | `{clr}` (clear line), `{cls}` (clear screen), `{home}`, `{hide}`, `{show}` |
-| **Special** | `{cursor}` (cursor position tracking) |
-
-**Usage Pattern:**
-```c
-// Simple formatting
-Z_CLEANUP(zstr_free) zstr result = zstr_expand_tokens("Status: {b}OK{/}");
-
-// Nested styles (stack-based)
-Z_CLEANUP(zstr_free) zstr result = zstr_expand_tokens("{bold}Bold {red}and red{/} just bold{/} normal");
-
-// 256-color support
-Z_CLEANUP(zstr_free) zstr result = zstr_expand_tokens("{fg:214}Orange text{/}");
-```
-
-**In Fuzzy Matching:**
-The fuzzy matching system in `src/fuzzy.c` inserts `{highlight}` tokens around matched characters. These tokens are preserved through the rendering pipeline and expanded to ANSI codes when displayed:
-
-```c
-// Input: "2025-11-29-test", query: "te"
-// Output: "2025-11-29-{highlight}te{/}st"
-// Displayed: "2025-11-29-[bold yellow]te[reset]st"
-```
-
-**Regenerating Token Parser:**
-```bash
-ragel -C -G2 src/tokens.rl -o src/tokens.c
-```
+7. `cmd_selector()` builds shell script for the action
+8. `run_script()` executes or prints the script
 
 ## Configuration
 
@@ -207,19 +156,17 @@ vec_push(&entries, entry);
 vec_free_TryEntry(&entries);  // Free vector (not contents!)
 ```
 
-**Emitting shell commands:**
+**Styled text output:**
 ```c
-emit_task("cd", "/some/path", NULL);
-printf("true\n");  // End command chain
-```
+// Simple styled text to zstr
+tui_zstr_printf(&output, TUI_BOLD, "Hello");
+zstr_cat(&output, " world\n");
 
-**Token expansion for UI text:**
-```c
-Z_CLEANUP(zstr_free) zstr formatted = zstr_from("{dim}Path:{/fg} {b}");
-zstr_cat(&formatted, some_path);
-zstr_cat(&formatted, "{/b}");
-Z_CLEANUP(zstr_free) zstr expanded = zstr_expand_tokens(zstr_cstr(&formatted));
-// Use expanded for output
+// Stack-based styling for complex output
+TuiStyleString ss = tui_start_zstr(&buf);
+tui_push(&ss, TUI_SELECTED);  // Push background
+tui_print(&ss, TUI_BOLD, "Name");  // Styled text (auto-resets, keeps bg)
+tui_pop(&ss);  // Restore previous style
 ```
 
 ## String and Array Management
@@ -235,17 +182,14 @@ Z_CLEANUP(zstr_free) zstr expanded = zstr_expand_tokens(zstr_cstr(&formatted));
 External dependencies are minimal:
 - Standard C library (POSIX)
 - Math library (`-lm` for fuzzy scoring)
-- Ragel (`ragel`) - only needed if modifying `src/tokens.rl`
 
 The `src/libs/` directory contains bundled single-header libraries (zstr, zvec, zlist) that are self-contained.
-
-Note: The generated `src/tokens.c` is checked into the repository, so Ragel is only required when modifying the token system.
 
 ## Directory Structure
 
 - `src/` - C source and header files
 - `src/libs/` - Bundled single-header libraries (z-libs: zstr, zvec, zlist)
-- `spec/` - Try specifications (CLI structure, fuzzy matching, token system, TUI)
+- `spec/` - Try specifications (CLI structure, fuzzy matching, TUI)
 - `docs/` - Reference implementation and z-libs documentation
 - `test/` - Test suite (test.sh)
 - `obj/` - Object files (created by make, gitignored)
@@ -257,23 +201,16 @@ Note: The generated `src/tokens.c` is checked into the repository, so Ragel is o
 
 - `src/main.c` - Entry point, argument parsing
 - `src/tui.c` - Interactive selector implementation
+- `src/tui_style.c` - TUI styling and screen API
 - `src/fuzzy.c` - Scoring and highlighting logic
-- `src/tokens.rl` - Token system (Ragel source)
-- `src/tokens.c` - Token system (generated, do not edit)
 - `src/utils.c` - Shared utilities
-- `src/commands.c` - Command implementations, shell emission
+- `src/commands.c` - Command implementations, script building
 - `Makefile` - Build configuration
 - `docs/try.reference.rb` - Ruby reference implementation (source of truth for features)
 
 ## Documentation Maintenance
 
 **IMPORTANT**: When making changes to certain subsystems, their corresponding documentation files must be updated:
-
-- **Token system** (`src/tokens.rl`):
-  - Update `spec/token_system.md` with any new tokens or changed ANSI codes
-  - Update the token table in this file (CLAUDE.md)
-  - Update `src/tokens.h` header documentation
-  - Regenerate C code: `ragel -C -G2 src/tokens.rl -o src/tokens.c`
 
 - **Fuzzy matching algorithm** (`src/fuzzy.c`, `fuzzy_match()`):
   - Update `spec/fuzzy_matching.md` with algorithm changes

@@ -35,20 +35,15 @@ typedef struct {
   vec_zstr delete_names;
 } SelectionResult;
 
-typedef enum {
-  MODE_DIRECT,
-  MODE_EXEC
-} ModeType;
-
+// Testing parameters (for automated tests)
 typedef struct {
-  ModeType type;
-  bool render_once;
-  const char *inject_keys;
-  int key_index;
-} Mode;
+  bool render_once;        // Render one frame and exit
+  const char *inject_keys; // Simulate keypresses
+  int key_index;           // Current position in inject_keys
+} TestParams;
 
 // Selector
 SelectionResult run_selector(const char *base_path, const char *initial_filter,
-                             Mode *mode);
+                             TestParams *test);
 
 #endif /* TUI_H */

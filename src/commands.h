@@ -6,19 +6,20 @@
 // Script header for exec mode output
 #define SCRIPT_HEADER "# if you can read this, you didn't launch try from an alias. run try --help.\n"
 
-// Init command - outputs shell function definition
+// Init command - outputs shell function definition (always prints directly)
 void cmd_init(int argc, char **argv, const char *tries_path);
 
-// Clone command (works in both modes)
-int cmd_clone(int argc, char **argv, const char *tries_path, Mode *mode);
+// Commands return shell scripts to execute
+// Returns empty zstr on error (after printing error to stderr)
+zstr cmd_clone(int argc, char **argv, const char *tries_path);
+zstr cmd_worktree(int argc, char **argv, const char *tries_path);
+zstr cmd_selector(int argc, char **argv, const char *tries_path, TestParams *test);
 
-// Worktree command (works in both modes)
-int cmd_worktree(int argc, char **argv, const char *tries_path, Mode *mode);
+// Route subcommands (for exec mode)
+zstr cmd_route(int argc, char **argv, const char *tries_path, TestParams *test);
 
-// Exec mode entry point (routes to selector or subcommands)
-int cmd_exec(int argc, char **argv, const char *tries_path, Mode *mode);
-
-// Interactive selector
-int cmd_selector(int argc, char **argv, const char *tries_path, Mode *mode);
+// Execute or print a script
+// exec_mode: true = print with header, false = execute via bash
+int run_script(const char *script, bool exec_mode);
 
 #endif // COMMANDS_H

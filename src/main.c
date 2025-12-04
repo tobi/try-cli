@@ -141,8 +141,9 @@ int main(int argc, char **argv) {
     tui_no_colors = true;
   }
 
-  // Mode configuration
-  Mode mode = {.type = MODE_DIRECT};
+  // Testing parameters (only used for automated tests)
+  TestParams test = {0};
+  bool exec_mode = false;
 
   // Parse arguments - options can appear anywhere
   for (int i = 1; i < argc; i++) {
@@ -165,7 +166,7 @@ int main(int argc, char **argv) {
       continue;
     }
     if (strcmp(arg, "--and-exit") == 0) {
-      mode.render_once = true;
+      test.render_once = true;
       continue;
     }
 
@@ -177,7 +178,7 @@ int main(int argc, char **argv) {
       continue;
     }
     if ((value = parse_option_value(arg, next, "--and-keys", &skip))) {
-      mode.inject_keys = value;
+      test.inject_keys = value;
       i += skip;
       continue;
     }
@@ -219,23 +220,48 @@ int main(int argc, char **argv) {
     cmd_init((int)cmd_args.length - 1, cmd_args.data + 1, path_cstr);
     return 0;
   } else if (strcmp(command, "exec") == 0) {
-    // Exec mode
-    mode.type = MODE_EXEC;
-    return cmd_exec((int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &mode);
+    // Exec mode - route subcommand and print script
+    exec_mode = true;
+    Z_CLEANUP(zstr_free) zstr script = cmd_route(
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &test);
+    if (zstr_is_empty(&script)) {
+      return 1; // Error or special case (like init)
+    }
+    return run_script(zstr_cstr(&script), exec_mode);
   } else if (strcmp(command, "cd") == 0) {
     // Direct mode cd (interactive selector)
-    return cmd_selector((int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &mode);
+    Z_CLEANUP(zstr_free) zstr script = cmd_selector(
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &test);
+    if (zstr_is_empty(&script)) {
+      return 1;
+    }
+    return run_script(zstr_cstr(&script), exec_mode);
   } else if (strcmp(command, "clone") == 0) {
     // Direct mode clone
-    return cmd_clone((int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &mode);
+    Z_CLEANUP(zstr_free) zstr script = cmd_clone(
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr);
+    if (zstr_is_empty(&script)) {
+      return 1;
+    }
+    return run_script(zstr_cstr(&script), exec_mode);
   } else if (strcmp(command, "worktree") == 0) {
     // Direct mode worktree
-    return cmd_worktree((int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &mode);
+    Z_CLEANUP(zstr_free) zstr script = cmd_worktree(
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr);
+    if (zstr_is_empty(&script)) {
+      return 1;
+    }
+    return run_script(zstr_cstr(&script), exec_mode);
   } else if (strncmp(command, "https://", 8) == 0 ||
              strncmp(command, "http://", 7) == 0 ||
              strncmp(command, "git@", 4) == 0) {
     // URL shorthand for clone: try <url> = try clone <url>
-    return cmd_clone((int)cmd_args.length, cmd_args.data, path_cstr, &mode);
+    Z_CLEANUP(zstr_free) zstr script = cmd_clone(
+        (int)cmd_args.length, cmd_args.data, path_cstr);
+    if (zstr_is_empty(&script)) {
+      return 1;
+    }
+    return run_script(zstr_cstr(&script), exec_mode);
   } else {
     // Unknown command - show help
     fprintf(stderr, "Unknown command: %s\n\n", command);
