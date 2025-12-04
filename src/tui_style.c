@@ -223,8 +223,37 @@ void tui_screen_write(Tui *t, TuiStyleString *line) {
   t->row++;
 }
 
+// Decode UTF-8 codepoint starting at s[i], return codepoint and advance i
+static unsigned int decode_utf8(const char *s, size_t len, size_t *i) {
+  unsigned char c = (unsigned char)s[*i];
+  unsigned int cp = 0;
+  if ((c & 0x80) == 0) {
+    cp = c;
+  } else if ((c & 0xE0) == 0xC0 && *i + 1 < len) {
+    cp = (c & 0x1F) << 6 | ((unsigned char)s[*i + 1] & 0x3F);
+    (*i)++;
+  } else if ((c & 0xF0) == 0xE0 && *i + 2 < len) {
+    cp = (c & 0x0F) << 12 | ((unsigned char)s[*i + 1] & 0x3F) << 6 |
+         ((unsigned char)s[*i + 2] & 0x3F);
+    (*i) += 2;
+  } else if ((c & 0xF8) == 0xF0 && *i + 3 < len) {
+    cp = (c & 0x07) << 18 | ((unsigned char)s[*i + 1] & 0x3F) << 12 |
+         ((unsigned char)s[*i + 2] & 0x3F) << 6 |
+         ((unsigned char)s[*i + 3] & 0x3F);
+    (*i) += 3;
+  }
+  return cp;
+}
+
+// Get display width of a Unicode codepoint
+static int codepoint_width(unsigned int cp) {
+  if (cp < 0x80) return 1;                    // ASCII
+  if (cp >= 0x1F300 && cp <= 0x1FAFF) return 2;  // Emojis
+  if (cp >= 0x2600 && cp <= 0x27BF) return 2;    // Misc symbols, dingbats
+  return 1;  // Default: arrows, box drawing, most other chars
+}
+
 // Calculate visible width of string (excluding ANSI escape sequences)
-// Handles UTF-8: counts codepoints, assumes width 2 for non-ASCII (emojis etc)
 static int visible_width(const char *s, size_t len) {
   int width = 0;
   for (size_t i = 0; i < len; i++) {
@@ -237,13 +266,11 @@ static int visible_width(const char *s, size_t len) {
         i++;
       }
     } else if ((c & 0xC0) == 0x80) {
-      // Skip UTF-8 continuation bytes
+      // Skip UTF-8 continuation bytes (already counted)
       continue;
-    } else if (c >= 0x80) {
-      // Non-ASCII: assume width 2 (emojis, etc)
-      width += 2;
     } else {
-      width++;
+      unsigned int cp = decode_utf8(s, len, &i);
+      width += codepoint_width(cp);
     }
   }
   return width;
@@ -263,12 +290,14 @@ static size_t truncate_at_width(const char *s, size_t len, int max_width) {
         i++;
       }
     } else if ((c & 0xC0) == 0x80) {
-      // Skip UTF-8 continuation bytes
+      // Skip UTF-8 continuation bytes (already counted)
       continue;
     } else {
-      int char_width = (c >= 0x80) ? 2 : 1;
+      size_t start = i;
+      unsigned int cp = decode_utf8(s, len, &i);
+      int char_width = codepoint_width(cp);
       if (width + char_width > max_width) {
-        return i;
+        return start;
       }
       width += char_width;
     }

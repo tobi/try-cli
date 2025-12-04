@@ -415,7 +415,7 @@ static void render(const char *base_path) {
       snprintf(score_buf, sizeof(score_buf), ", %.1f", entry->score);
       int meta_len = (int)zstr_len(&rel_time) + (int)strlen(score_buf);
 
-      int prefix_len = 6;  // "→ " (3) + "📁 " (3) with UTF-8 width=2 for each symbol
+      int prefix_len = 5;  // "→ " (2) + "📁 " (3): arrow=1, emoji=2, spaces=2
       int name_len = (int)zstr_len(&entry->name);
       int path_end = prefix_len + name_len;
       int meta_start = cols - 1 - meta_len;
