@@ -224,16 +224,24 @@ void tui_screen_write(Tui *t, TuiStyleString *line) {
 }
 
 // Calculate visible width of string (excluding ANSI escape sequences)
+// Handles UTF-8: counts codepoints, assumes width 2 for non-ASCII (emojis etc)
 static int visible_width(const char *s, size_t len) {
   int width = 0;
   for (size_t i = 0; i < len; i++) {
-    if (s[i] == '\033' && i + 1 < len && s[i + 1] == '[') {
+    unsigned char c = (unsigned char)s[i];
+    if (c == '\033' && i + 1 < len && s[i + 1] == '[') {
       // Skip ANSI escape sequence
       i += 2;
       while (i < len && !((s[i] >= 'A' && s[i] <= 'Z') ||
                           (s[i] >= 'a' && s[i] <= 'z'))) {
         i++;
       }
+    } else if ((c & 0xC0) == 0x80) {
+      // Skip UTF-8 continuation bytes
+      continue;
+    } else if (c >= 0x80) {
+      // Non-ASCII: assume width 2 (emojis, etc)
+      width += 2;
     } else {
       width++;
     }
@@ -246,18 +254,23 @@ static int visible_width(const char *s, size_t len) {
 static size_t truncate_at_width(const char *s, size_t len, int max_width) {
   int width = 0;
   for (size_t i = 0; i < len; i++) {
-    if (s[i] == '\033' && i + 1 < len && s[i + 1] == '[') {
+    unsigned char c = (unsigned char)s[i];
+    if (c == '\033' && i + 1 < len && s[i + 1] == '[') {
       // Skip ANSI escape sequence (include it in output)
       i += 2;
       while (i < len && !((s[i] >= 'A' && s[i] <= 'Z') ||
                           (s[i] >= 'a' && s[i] <= 'z'))) {
         i++;
       }
+    } else if ((c & 0xC0) == 0x80) {
+      // Skip UTF-8 continuation bytes
+      continue;
     } else {
-      if (width >= max_width) {
+      int char_width = (c >= 0x80) ? 2 : 1;
+      if (width + char_width > max_width) {
         return i;
       }
-      width++;
+      width += char_width;
     }
   }
   return len;

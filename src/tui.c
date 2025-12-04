@@ -349,11 +349,11 @@ static void render(const char *base_path) {
   // Header
   TuiStyleString line = tui_screen_line(&t);
   tui_print(&line, TUI_H1, "🏠 Try Directory Selection");
-  tui_screen_write(&t, &line);
+  tui_screen_write_truncated(&t, &line, "… ");
 
   line = tui_screen_line(&t);
   tui_print(&line, TUI_DARK, sep);
-  tui_screen_write(&t, &line);
+  tui_screen_write_truncated(&t, &line, NULL);
 
   // Search bar with input
   line = tui_screen_line(&t);
@@ -361,11 +361,11 @@ static void render(const char *base_path) {
   tui_print(&line, NULL, " ");
   tui_screen_input(&t, &filter_input);
   tui_clr(line.str);
-  tui_screen_write(&t, &line);
+  tui_screen_write_truncated(&t, &line, "… ");
 
   line = tui_screen_line(&t);
   tui_print(&line, TUI_DARK, sep);
-  tui_screen_write(&t, &line);
+  tui_screen_write_truncated(&t, &line, NULL);
 
   // List
   int list_height = rows - 8;
@@ -387,40 +387,7 @@ static void render(const char *base_path) {
       // Get line (selected or normal)
       line = is_selected ? tui_screen_line_selected(&t) : tui_screen_line(&t);
 
-      // Build metadata
-      Z_CLEANUP(zstr_free) zstr rel_time = format_relative_time(entry->mtime);
-      char score_text[16];
-      snprintf(score_text, sizeof(score_text), ", %.1f", entry->score);
-
-      // Calculate display name (possibly truncated)
-      int prefix_len = 5;  // "→ " or "  " + emoji + space
-      int max_name_len = cols - prefix_len - 1;
-      int plain_len = (int)zstr_len(&entry->name);
-      bool name_truncated = false;
-
-      Z_CLEANUP(zstr_free) zstr display_name = zstr_init();
-      if (plain_len > max_name_len && max_name_len > 4) {
-        const char *rendered = zstr_cstr(&entry->rendered);
-        int chars_to_copy = max_name_len - 1;
-        int visible_count = 0;
-        const char *p = rendered;
-        while (*p && visible_count < chars_to_copy) {
-          if (*p == '\033') {
-            zstr_push(&display_name, *p++);
-            while (*p && *p != 'm') zstr_push(&display_name, *p++);
-            if (*p == 'm') zstr_push(&display_name, *p++);
-          } else {
-            zstr_push(&display_name, *p++);
-            visible_count++;
-          }
-        }
-        zstr_cat(&display_name, "…");
-        name_truncated = true;
-      } else {
-        zstr_cat(&display_name, zstr_cstr(&entry->rendered));
-      }
-
-      // Render entry
+      // Render entry prefix and name
       bool danger_pushed = false;
       if (is_selected) {
         tui_print(&line, TUI_HIGHLIGHT, "→ ");
@@ -440,32 +407,29 @@ static void render(const char *base_path) {
           tui_print(&line, NULL, "  📁 ");
         }
       }
-      tui_print(&line, NULL, zstr_cstr(&display_name));
+      tui_print(&line, NULL, zstr_cstr(&entry->rendered));
 
-      // Metadata (right-aligned)
-      Z_CLEANUP(zstr_free) zstr full_meta = zstr_init();
-      zstr_cat(&full_meta, zstr_cstr(&rel_time));
-      zstr_cat(&full_meta, score_text);
-      int full_meta_len = (int)zstr_len(&full_meta);
+      // Calculate metadata and positioning
+      Z_CLEANUP(zstr_free) zstr rel_time = format_relative_time(entry->mtime);
+      char score_buf[16];
+      snprintf(score_buf, sizeof(score_buf), ", %.1f", entry->score);
+      int meta_len = (int)zstr_len(&rel_time) + (int)strlen(score_buf);
 
-      int actual_name_len = name_truncated ? max_name_len : plain_len;
-      int path_end_pos = prefix_len + actual_name_len;
-      int meta_start_pos = cols - 1 - full_meta_len;
-      int available_space = meta_start_pos - path_end_pos;
+      int prefix_len = 6;  // "→ " (3) + "📁 " (3) with UTF-8 width=2 for each symbol
+      int name_len = (int)zstr_len(&entry->name);
+      int path_end = prefix_len + name_len;
+      int meta_start = cols - 1 - meta_len;
+      int available = meta_start - path_end;
 
-      if (available_space > 2) {
-        for (int p = 0; p < available_space; p++) tui_putc(&line, ' ');
-        tui_print(&line, TUI_DARK, zstr_cstr(&full_meta));
-      } else if (available_space > -full_meta_len + 3) {
-        int chars_to_skip = (available_space < 1) ? (1 - available_space) : 0;
-        if (full_meta_len - chars_to_skip > 2) {
-          tui_putc(&line, ' ');
-          tui_print(&line, TUI_DARK, zstr_cstr(&full_meta) + chars_to_skip);
-        }
+      // Show metadata only if there's enough space (spec: hide if path truncated)
+      if (available > 2) {
+        for (int p = 0; p < available; p++) tui_putc(&line, ' ');
+        tui_print(&line, TUI_DARK, zstr_cstr(&rel_time));
+        tui_print(&line, TUI_DARK, score_buf);
       }
 
       if (danger_pushed) tui_pop(&line);
-      tui_screen_write(&t, &line);
+      tui_screen_write_truncated(&t, &line, "… ");
 
     } else if (idx == (int)filtered_ptrs.length && zstr_len(&filter_input.text) > 0) {
       // Separator before "Create new"
@@ -493,7 +457,7 @@ static void render(const char *base_path) {
       }
       tui_print(&line, NULL, "📂 Create new: ");
       tui_print(&line, TUI_DARK, zstr_cstr(&preview));
-      tui_screen_write(&t, &line);
+      tui_screen_write_truncated(&t, &line, "… ");
     } else {
       tui_screen_empty(&t);
     }
@@ -502,7 +466,7 @@ static void render(const char *base_path) {
   // Footer
   line = tui_screen_line(&t);
   tui_print(&line, TUI_DARK, sep);
-  tui_screen_write(&t, &line);
+  tui_screen_write_truncated(&t, &line, NULL);
 
   line = tui_screen_line(&t);
   if (marked_count > 0) {
@@ -512,7 +476,7 @@ static void render(const char *base_path) {
   } else {
     tui_print(&line, TUI_DARK, "↑/↓: Navigate  Enter: Select  Ctrl-D: Delete  Esc: Cancel");
   }
-  tui_screen_write(&t, &line);
+  tui_screen_write_truncated(&t, &line, "… ");
   // tui_free(&t) called automatically via Z_CLEANUP
 }
 
