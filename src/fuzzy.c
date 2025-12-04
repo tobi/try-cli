@@ -1,6 +1,6 @@
 #include "fuzzy.h"
 #include "tui.h"
-#include "utils.h"
+#include "tui.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -19,8 +19,8 @@ void fuzzy_match(TryEntry *entry, const char *query) {
   // Reset score
   entry->score = 0.0;
 
-  // Reset rendered string (reuse capacity if possible)
-  zstr_clear(&entry->rendered);
+  // Style string for proper nesting (dark date section + match highlights)
+  TuiStyleString ss = tui_start_zstr(&entry->rendered);
 
   const char *text = zstr_cstr(&entry->name);
 
@@ -28,10 +28,10 @@ void fuzzy_match(TryEntry *entry, const char *query) {
   if (!query || !*query) {
     // Check for date prefix and render with dimming
     if (has_date_prefix(text)) {
-      // Render date prefix (YYYY-MM-DD-) with {dark}, including the trailing dash
-      zstr_cat(&entry->rendered, "{dark}");
+      // Render date prefix (YYYY-MM-DD-) with dark color, including the trailing dash
+      tui_push(&ss, TUI_DARK);
       zstr_cat_len(&entry->rendered, text, 11); // Date + dash is 11 chars
-      zstr_cat(&entry->rendered, "{/fg}");
+      tui_pop(&ss);
       zstr_cat(&entry->rendered, text + 11); // Rest after dash
     } else {
       zstr_cat(&entry->rendered, text);
@@ -73,7 +73,7 @@ void fuzzy_match(TryEntry *entry, const char *query) {
   while (*t_ptr) {
     // Handle date prefix dimming (including the trailing dash at position 10)
     if (has_date && current_pos == 0) {
-      zstr_cat(&entry->rendered, "{dark}");
+      tui_push(&ss, TUI_DARK);
       in_date_section = true;
     }
 
@@ -95,18 +95,18 @@ void fuzzy_match(TryEntry *entry, const char *query) {
       last_pos = current_pos;
       query_idx++;
 
-      // Append highlighted char (bold+yellow)
-      zstr_cat(&entry->rendered, "{highlight}");
-      zstr_push(&entry->rendered, *orig_ptr);
-      zstr_cat(&entry->rendered, "{/}");
+      // Append highlighted char (yellow fg, preserves dark if in date section)
+      tui_push(&ss, TUI_MATCH);
+      tui_putc(&ss, *orig_ptr);
+      tui_pop(&ss);
     } else {
       // No match, append regular char
-      zstr_push(&entry->rendered, *orig_ptr);
+      tui_putc(&ss, *orig_ptr);
     }
 
     // Close dim section after the trailing dash (position 10)
     if (has_date && current_pos == 10 && in_date_section) {
-      zstr_cat(&entry->rendered, "{/fg}");
+      tui_pop(&ss);
       in_date_section = false;
     }
 

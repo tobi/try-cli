@@ -481,12 +481,9 @@ int cmd_exec(int argc, char **argv, const char *tries_path, Mode *mode) {
     return 1;
   }
   if (strcmp(subcmd, "--no-colors") == 0) {
-    zstr_no_colors = true;
+    extern bool tui_no_colors;
+    tui_no_colors = true;
     // Continue with remaining args
-    return cmd_exec(argc - 1, argv + 1, tries_path, mode);
-  }
-  if (strcmp(subcmd, "--no-expand-tokens") == 0) {
-    zstr_disable_token_expansion = true;
     return cmd_exec(argc - 1, argv + 1, tries_path, mode);
   }
 

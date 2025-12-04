@@ -1,28 +1,17 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include "zstr.h"
-#include "zvec.h"
-#include "tokens.h"
+#include "libs/zstr.h"
+#include "libs/zvec.h"
+#include "tui.h"
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
 
-// Generate common vector types
-Z_VEC_GENERATE_IMPL(zstr, zstr)
+// Generate common vector types (vec_zstr is in tui.h)
 Z_VEC_GENERATE_IMPL(char *, char_ptr)
 
-// ANSI Colors (legacy defines, prefer using tokens instead)
-#define ANSI_RESET "\033[0m"
-#define ANSI_BOLD "\033[1m"
-#define ANSI_DIM "\033[2m"
-#define ANSI_RED "\033[31m"
-#define ANSI_GREEN "\033[32m"
-#define ANSI_YELLOW "\033[33m"
-#define ANSI_BLUE "\033[34m"
-#define ANSI_MAGENTA "\033[35m"
-#define ANSI_CYAN "\033[36m"
-#define ANSI_WHITE "\033[37m"
+// ANSI colors moved to tui.h
 
 // Defer helper for standard pointers (zstr has Z_CLEANUP(zstr_free))
 static inline void cleanup_free(void *p) { free(*(void **)p); }
