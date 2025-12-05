@@ -169,6 +169,14 @@ static zstr build_worktree_script(const char *worktree_path) {
 static zstr build_delete_script(const char *base_path, vec_zstr *names) {
   zstr script = zstr_init();
 
+  // Security: verify no names contain path separators
+  zstr *check;
+  vec_foreach(names, check) {
+    if (strchr(zstr_cstr(check), '/') != NULL) {
+      return script;  // Return empty script
+    }
+  }
+
   // Get current working directory for PWD restoration
   char cwd[1024];
   if (getcwd(cwd, sizeof(cwd)) == NULL) {
@@ -194,6 +202,30 @@ static zstr build_delete_script(const char *base_path, vec_zstr *names) {
   } else {
     zstr_cat(&script, "  cd \"$HOME\"\n");
   }
+
+  return script;
+}
+
+static zstr build_rename_script(const char *base_path, const char *old_name, const char *new_name) {
+  zstr script = zstr_init();
+
+  // Security: names must not contain path separators
+  if (strchr(old_name, '/') != NULL || strchr(new_name, '/') != NULL) {
+    return script;  // Return empty script
+  }
+
+  Z_CLEANUP(zstr_free) zstr escaped_base = shell_escape(base_path);
+  Z_CLEANUP(zstr_free) zstr escaped_old = shell_escape(old_name);
+  Z_CLEANUP(zstr_free) zstr escaped_new = shell_escape(new_name);
+
+  // cd to base path, rename, then cd to renamed directory
+  zstr_fmt(&script, "cd %s && \\\n", zstr_cstr(&escaped_base));
+  zstr_fmt(&script, "mv %s %s && \\\n", zstr_cstr(&escaped_old), zstr_cstr(&escaped_new));
+
+  // Build path to new directory
+  Z_CLEANUP(zstr_free) zstr new_path = join_path(base_path, new_name);
+  Z_CLEANUP(zstr_free) zstr escaped_new_path = shell_escape(zstr_cstr(&new_path));
+  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_new_path));
 
   return script;
 }
@@ -444,6 +476,12 @@ zstr cmd_selector(int argc, char **argv, const char *tries_path, TestParams *tes
       zstr_free(iter);
     }
     vec_free_zstr(&result.delete_names);
+  } else if (result.type == ACTION_RENAME) {
+    script = build_rename_script(tries_path,
+                                  zstr_cstr(&result.rename_old_name),
+                                  zstr_cstr(&result.rename_new_name));
+    zstr_free(&result.rename_old_name);
+    zstr_free(&result.rename_new_name);
   } else {
     // Cancelled - return empty script but print message
     fprintf(stderr, "Cancelled.\n");

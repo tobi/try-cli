@@ -282,21 +282,27 @@ static bool render_delete_confirmation(const char *base_path, TestParams *test) 
   if (max_show > (int)marked_items.length) max_show = (int)marked_items.length;
 
   while (1) {
+    int rows, cols;
+    get_window_size(&rows, &cols);
+    const char *sep = get_separator_line(cols);
+
     Tui t = tui_begin_screen(stderr);
 
     // Title
     TuiStyleString line = tui_screen_line(&t);
-    tui_printf(&line, TUI_BOLD, "Delete %zu director%s?",
+    tui_printf(&line, TUI_BOLD, "🗑️  Delete %zu director%s?",
                marked_items.length, marked_items.length == 1 ? "y" : "ies");
     tui_screen_write(&t, &line);
-    tui_screen_empty(&t);
+
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, sep);
+    tui_screen_write(&t, &line);
 
     // List items
+    tui_screen_empty(&t);
     for (int i = 0; i < max_show; i++) {
       line = tui_screen_line(&t);
-      tui_print(&line, NULL, "  ");
-      tui_print(&line, TUI_DARK, "-");
-      tui_print(&line, NULL, " ");
+      tui_print(&line, TUI_DARK, "  - ");
       tui_print(&line, NULL, zstr_cstr(&marked_items.data[i]->name));
       tui_screen_write(&t, &line);
     }
@@ -313,7 +319,17 @@ static bool render_delete_confirmation(const char *base_path, TestParams *test) 
     tui_print(&line, TUI_HIGHLIGHT, "YES");
     tui_print(&line, TUI_DARK, " to confirm: ");
     tui_screen_input(&t, &input);
-    tui_clr(line.str);  // Cut off overflow
+    tui_clr(line.str);
+    tui_screen_write(&t, &line);
+
+    tui_screen_empty(&t);
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, sep);
+    tui_screen_write(&t, &line);
+
+    // Instructions
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, "Enter: Confirm  Esc: Cancel");
     tui_screen_write(&t, &line);
 
     tui_free(&t);
@@ -336,6 +352,138 @@ static bool render_delete_confirmation(const char *base_path, TestParams *test) 
   vec_free_TryEntryPtr(&marked_items);
   tui_input_free(&input);
   return confirmed;
+}
+
+// Helper to extract date prefix from entry name
+// Returns length of date prefix (including trailing dash), or 0 if no valid prefix
+static int get_date_prefix_len(const char *name) {
+  // Expected format: YYYY-MM-DD-
+  if (strlen(name) < 11) return 0;
+
+  // Check format: digits, dash, digits, dash, digits, dash
+  for (int i = 0; i < 4; i++) {
+    if (!isdigit((unsigned char)name[i])) return 0;
+  }
+  if (name[4] != '-') return 0;
+  for (int i = 5; i < 7; i++) {
+    if (!isdigit((unsigned char)name[i])) return 0;
+  }
+  if (name[7] != '-') return 0;
+  for (int i = 8; i < 10; i++) {
+    if (!isdigit((unsigned char)name[i])) return 0;
+  }
+  if (name[10] != '-') return 0;
+
+  return 11;  // "YYYY-MM-DD-" = 11 chars
+}
+
+// Render rename dialog for a single entry
+// Returns the new name (with date prefix), or empty zstr if cancelled
+static zstr render_rename_dialog(TryEntry *entry, TestParams *test) {
+  const char *old_name = zstr_cstr(&entry->name);
+  int prefix_len = get_date_prefix_len(old_name);
+
+  // Extract date prefix and suffix
+  Z_CLEANUP(zstr_free) zstr date_prefix = zstr_init();
+  const char *old_suffix = old_name;
+
+  if (prefix_len > 0) {
+    zstr_cat_len(&date_prefix, old_name, prefix_len);
+    old_suffix = old_name + prefix_len;
+  } else {
+    // No date prefix - generate one from today
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char buf[16];
+    strftime(buf, sizeof(buf), "%Y-%m-%d-", t);
+    zstr_cat(&date_prefix, buf);
+    old_suffix = old_name;
+  }
+
+  TuiInput input = tui_input_init();
+  // Pre-fill with date prefix, cursor at end
+  zstr_cat(&input.text, zstr_cstr(&date_prefix));
+  input.cursor = (int)zstr_len(&input.text);
+  // Set placeholder to full old name (shown when input cleared or after cursor)
+  input.placeholder = old_name;
+
+  zstr result = zstr_init();
+  bool is_test = (test && test->inject_keys);
+
+  while (1) {
+    int rows, cols;
+    get_window_size(&rows, &cols);
+    const char *sep = get_separator_line(cols);
+
+    Tui t = tui_begin_screen(stderr);
+
+    // Title
+    TuiStyleString line = tui_screen_line(&t);
+    tui_print(&line, TUI_BOLD, "📝 Rename Directory");
+    tui_screen_write(&t, &line);
+
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, sep);
+    tui_screen_write(&t, &line);
+
+    // Show current name
+    tui_screen_empty(&t);
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, "Current: ");
+    tui_print(&line, NULL, old_name);
+    tui_screen_write(&t, &line);
+
+    tui_screen_empty(&t);
+
+    // Input prompt
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, "New name: ");
+    tui_screen_input(&t, &input);
+    tui_clr(line.str);
+    tui_screen_write(&t, &line);
+
+    tui_screen_empty(&t);
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, sep);
+    tui_screen_write(&t, &line);
+
+    // Instructions
+    line = tui_screen_line(&t);
+    tui_print(&line, TUI_DARK, "Enter: Confirm  Esc: Cancel");
+    tui_screen_write(&t, &line);
+
+    tui_free(&t);
+
+    // Read key
+    int c = is_test ? read_test_key(test) : read_key();
+
+    if (c == -1 || c == ESC_KEY || c == 3) {
+      // Cancelled
+      break;
+    } else if (c == ENTER_KEY) {
+      // Confirm - return the new name
+      const char *new_text = zstr_cstr(&input.text);
+      if (strlen(new_text) > 0) {
+        // Security: reject any path with /
+        if (strchr(new_text, '/') != NULL) {
+          break;  // Invalid - contains path separator
+        }
+        // If user only typed date prefix, append the old suffix
+        if (strcmp(new_text, zstr_cstr(&date_prefix)) == 0 && strlen(old_suffix) > 0) {
+          zstr_cat(&result, new_text);
+          zstr_cat(&result, old_suffix);
+        } else {
+          zstr_cat(&result, new_text);
+        }
+      }
+      break;
+    } else {
+      tui_input_handle_key(&input, c);
+    }
+  }
+
+  tui_input_free(&input);
+  return result;
 }
 
 static void render(const char *base_path) {
@@ -462,7 +610,7 @@ static void render(const char *base_path) {
     tui_printf(&line, NULL, " | %d marked | ", marked_count);
     tui_print(&line, TUI_DARK, "Ctrl-D: Toggle  Enter: Confirm  Esc: Cancel");
   } else {
-    tui_print(&line, TUI_DARK, "↑/↓: Navigate  Enter: Select  Ctrl-D: Delete  Esc: Cancel");
+    tui_print(&line, TUI_DARK, "↑/↓: Navigate  Enter: Select  ^R: Rename  ^D: Delete  Esc: Cancel");
   }
   tui_screen_write_truncated(&t, &line, NULL);
   // tui_free(&t) called automatically via Z_CLEANUP
@@ -553,6 +701,23 @@ SelectionResult run_selector(const char *base_path,
         } else {
           marked_count--;
         }
+      }
+    } else if (c == 18) {
+      // Ctrl-R: Rename current item
+      if (selected_index < (int)filtered_ptrs.length) {
+        TryEntry *entry = filtered_ptrs.data[selected_index];
+        zstr new_name = render_rename_dialog(entry, test);
+        if (zstr_len(&new_name) > 0) {
+          // Check if name actually changed
+          if (strcmp(zstr_cstr(&new_name), zstr_cstr(&entry->name)) != 0) {
+            result.type = ACTION_RENAME;
+            result.path = zstr_dup(&entry->path);
+            result.rename_old_name = zstr_dup(&entry->name);
+            result.rename_new_name = new_name;
+            break;
+          }
+        }
+        zstr_free(&new_name);
       }
     } else if (c == ENTER_KEY) {
       // If items are marked, show confirmation dialog

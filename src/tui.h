@@ -17,7 +17,8 @@ typedef enum {
   ACTION_CD,
   ACTION_MKDIR,
   ACTION_CANCEL,
-  ACTION_DELETE
+  ACTION_DELETE,
+  ACTION_RENAME
 } ActionType;
 
 typedef struct {
@@ -33,6 +34,8 @@ typedef struct {
   ActionType type;
   zstr path;
   vec_zstr delete_names;
+  zstr rename_old_name;  // For ACTION_RENAME: original directory name
+  zstr rename_new_name;  // For ACTION_RENAME: new name (full, with date prefix)
 } SelectionResult;
 
 // Testing parameters (for automated tests)
