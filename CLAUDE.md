@@ -230,8 +230,11 @@ The `VERSION` file is the single source of truth for version numbers. It is read
 
 1. Update the `VERSION` file with the new version number
 2. Commit and push to master
-3. Create and push an annotated tag with release notes:
+3. Create and push an annotated tag with release notes covering all changes since the previous 1.X series (e.g., if releasing 1.4.x, include all changes since the last 1.3.x release):
    ```bash
+   # Review changes since previous series (e.g., if on 1.4.x, check since v1.3.5)
+   git log v1.3.5..HEAD --oneline
+
    git tag -a vX.Y.Z -m "Release vX.Y.Z" -m "- Feature 1" -m "- Bug fix 2"
    git push origin vX.Y.Z
    ```
