@@ -28,10 +28,10 @@ jobs:
       run: nix build .#packages.x86_64-linux.default
 
     - name: Run tests
-      run: nix run .#apps.x86_64-linux.default -- test-fast
+      run: nix develop --command "make test-fast"
 
     - name: Run valgrind tests
-      run: nix run .#apps.x86_64-linux.default -- test-valgrind
+      run: nix develop --command "make test-valgrind"
 
   cross-compile:
     name: Cross-compile
@@ -100,6 +100,29 @@ jobs:
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  flakehub-publish:
+    name: Publish to FlakeHub
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: DeterminateSystems/determinate-nix-action@v3
+
+    - name: Publish to FlakeHub
+      uses: DeterminateSystems/flakehub-push@main
+      with:
+        name: ${{ github.repository }}
+        visibility: public
+        rolling: true
 
   aur-publish:
     name: Publish to AUR
