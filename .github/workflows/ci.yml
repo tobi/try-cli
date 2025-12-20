@@ -31,7 +31,6 @@ jobs:
     environment: OpenSource
     name: Cross-compile
     if: startsWith(github.ref, 'refs/tags/')
-    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
