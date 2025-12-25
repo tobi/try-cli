@@ -95,12 +95,13 @@ int run_script(const char *script, bool exec_mode) {
     }
   }
 
-  // Print cd hint
+  // Print cd hint and path
   if (cd_line) {
     const char *path_start = cd_line + 6; // Skip "  cd '"
     const char *path_end = strchr(path_start, '\'');
     if (path_end) {
       printf("cd '%.*s'\n", (int)(path_end - path_start), path_start);
+      printf("%.*s\n", (int)(path_end - path_start), path_start);
     }
   }
 
@@ -137,7 +138,8 @@ static zstr build_cd_script(const char *path) {
   zstr script = zstr_init();
   Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(path);
   zstr_fmt(&script, "touch %s && \\\n", zstr_cstr(&escaped_path));
-  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s && \\\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  printf '%%s\\n' %s\n", zstr_cstr(&escaped_path));
   return script;
 }
 
@@ -145,7 +147,8 @@ static zstr build_mkdir_script(const char *path) {
   zstr script = zstr_init();
   Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(path);
   zstr_fmt(&script, "mkdir -p %s && \\\n", zstr_cstr(&escaped_path));
-  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s && \\\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  printf '%%s\\n' %s\n", zstr_cstr(&escaped_path));
   return script;
 }
 
@@ -154,7 +157,8 @@ static zstr build_clone_script(const char *url, const char *path) {
   Z_CLEANUP(zstr_free) zstr escaped_url = shell_escape(url);
   Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(path);
   zstr_fmt(&script, "git clone %s %s && \\\n", zstr_cstr(&escaped_url), zstr_cstr(&escaped_path));
-  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s && \\\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  printf '%%s\\n' %s\n", zstr_cstr(&escaped_path));
   return script;
 }
 
@@ -162,7 +166,8 @@ static zstr build_worktree_script(const char *worktree_path) {
   zstr script = zstr_init();
   Z_CLEANUP(zstr_free) zstr escaped_path = shell_escape(worktree_path);
   zstr_fmt(&script, "git worktree add %s && \\\n", zstr_cstr(&escaped_path));
-  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  cd %s && \\\n", zstr_cstr(&escaped_path));
+  zstr_fmt(&script, "  printf '%%s\\n' %s\n", zstr_cstr(&escaped_path));
   return script;
 }
 
@@ -225,7 +230,8 @@ static zstr build_rename_script(const char *base_path, const char *old_name, con
   // Build path to new directory
   Z_CLEANUP(zstr_free) zstr new_path = join_path(base_path, new_name);
   Z_CLEANUP(zstr_free) zstr escaped_new_path = shell_escape(zstr_cstr(&new_path));
-  zstr_fmt(&script, "  cd %s\n", zstr_cstr(&escaped_new_path));
+  zstr_fmt(&script, "  cd %s && \\\n", zstr_cstr(&escaped_new_path));
+  zstr_fmt(&script, "  printf '%%s\\n' %s\n", zstr_cstr(&escaped_new_path));
 
   return script;
 }
