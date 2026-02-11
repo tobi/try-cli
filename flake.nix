@@ -86,20 +86,21 @@
             };
           };
 
-          # Cross-compilation packages
-          x86_64-linux = pkgs.stdenv.mkDerivation {
+          # Cross-compilation packages (statically linked with musl for portability)
+          x86_64-linux = pkgs.pkgsStatic.stdenv.mkDerivation {
             pname = "try";
             version = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./VERSION);
 
             src = inputs.self;
 
-            nativeBuildInputs = with pkgs; [
+            nativeBuildInputs = with pkgs.pkgsStatic; [
               gcc
               gnumake
             ];
 
+            # Force static linking for portable binary
             buildPhase = ''
-              make
+              make LDFLAGS="-static"
             '';
 
             installPhase = ''
@@ -116,19 +117,20 @@
             };
           };
 
-          aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform.stdenv.mkDerivation {
+          aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.mkDerivation {
             pname = "try";
             version = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./VERSION);
 
             src = inputs.self;
 
-            nativeBuildInputs = with pkgs.pkgsCross.aarch64-multiplatform; [
+            nativeBuildInputs = with pkgs.pkgsCross.aarch64-multiplatform-musl; [
               gcc
               gnumake
             ];
 
+            # Force static linking for portable binary
             buildPhase = ''
-              make
+              make LDFLAGS="-static"
             '';
 
             installPhase = ''
