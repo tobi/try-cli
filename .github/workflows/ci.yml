@@ -77,7 +77,10 @@ jobs:
         for dir in try-*; do
           if [ -d "$dir" ]; then
             chmod +x "$dir/try"
-            tar -czf "${dir}.tar.gz" -C "$dir" "try"
+            # Rename from arch-os (x86_64-linux) to os-arch (linux-x86_64) format
+            # to match README documentation
+            new_name=$(echo "$dir" | sed 's/try-\(.*\)-\(.*\)/try-\2-\1/')
+            tar -czf "${new_name}.tar.gz" -C "$dir" "try"
           fi
         done
         ls -la *.tar.gz

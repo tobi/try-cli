@@ -30,14 +30,12 @@ Instantly navigate through all your experiment directories with:
 curl -sL https://github.com/tobi/try-cli/releases/latest/download/try-linux-x86_64.tar.gz | tar xz
 sudo mv try /usr/local/bin/
 
-# macOS (Intel)
-curl -sL https://github.com/tobi/try-cli/releases/latest/download/try-darwin-x86_64.tar.gz | tar xz
-sudo mv try /usr/local/bin/
-
-# macOS (Apple Silicon)
-curl -sL https://github.com/tobi/try-cli/releases/latest/download/try-darwin-aarch64.tar.gz | tar xz
+# Linux aarch64
+curl -sL https://github.com/tobi/try-cli/releases/latest/download/try-linux-aarch64.tar.gz | tar xz
 sudo mv try /usr/local/bin/
 ```
+
+> **macOS users**: Pre-built binaries for macOS are not currently available. Please use [Nix](#nix) or [build from source](#build-from-source) instead.
 
 ### Shell integration
 
