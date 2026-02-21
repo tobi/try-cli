@@ -34,11 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - target: x86_64-linux
-            artifact: try-linux-x86_64
-          - target: aarch64-linux
-            artifact: try-linux-aarch64
+        target: [x86_64-linux, aarch64-linux]
 
     steps:
     - name: Checkout code
@@ -53,7 +49,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v5
       with:
-        name: ${{ matrix.artifact }}
+        name: try-${{ matrix.target }}
         path: result/bin/try
         retention-days: 7
 
