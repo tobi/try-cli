@@ -61,21 +61,21 @@ jobs:
     environment: OpenSource
     name: Build macOS (${{ matrix.arch }})
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-latest
     strategy:
       matrix:
         include:
-          - runner: macos-13
-            arch: x86_64
-          - runner: macos-latest
-            arch: aarch64
+          - arch: x86_64
+            cc: clang -arch x86_64
+          - arch: aarch64
+            cc: clang
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
 
     - name: Build
-      run: make
+      run: make CC="${{ matrix.cc }}"
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v5
