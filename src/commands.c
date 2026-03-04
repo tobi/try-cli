@@ -391,9 +391,14 @@ void cmd_init(int argc, char **argv, const char *tries_path) {
     // Fish shell version
     printf(
       "function try\n"
-      "  set -l out (%s exec --path %s $argv 2>/dev/tty)\n"
-      "  or begin; echo $out; return $status; end\n"
-      "  eval $out\n"
+      "  set -l out (%s exec --path %s $argv 2>/dev/tty | string collect)\n"
+      "  set -l rc $pipestatus[1]\n"
+      "  if test $rc -eq 0\n"
+      "    eval $out\n"
+      "  else\n"
+      "    echo $out\n"
+      "    return $rc\n"
+      "  end\n"
       "end\n",
       zstr_cstr(&escaped_self), zstr_cstr(&escaped_tries));
   } else {
