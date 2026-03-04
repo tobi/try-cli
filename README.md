@@ -46,7 +46,7 @@ sudo mv try /usr/local/bin/
 echo 'eval "$(try init ~/src/tries)"' >> ~/.zshrc
 
 # For fish shell users
-echo 'eval (try init ~/src/tries | string collect)' >> ~/.config/fish/config.fish
+echo 'eval (command try init ~/src/tries | string collect)' >> ~/.config/fish/config.fish
 ```
 
 ### Build from source
@@ -117,9 +117,9 @@ Not just substring matching - it's smart:
 - Fish:
 
   ```fish
-  eval (try init | string collect)
+  eval (command try init | string collect)
   # Or pick a path
-  eval (try init ~/code/experiments | string collect)
+  eval (command try init ~/code/experiments | string collect)
   ```
 
 Notes:
