@@ -13,6 +13,11 @@ Z_VEC_GENERATE_IMPL(zstr, zstr)
 // ============================================================================
 
 typedef enum {
+  SELECTOR_FOLDERS,  // Normal mode: pick/create folders in tries_path
+  SELECTOR_ENVS      // Env mode: pick environment subdirectory from base_path
+} SelectorMode;
+
+typedef enum {
   ACTION_NONE,
   ACTION_CD,
   ACTION_MKDIR,
@@ -46,7 +51,8 @@ typedef struct {
 } TestParams;
 
 // Selector
+// mode: SELECTOR_FOLDERS for normal folder picker, SELECTOR_ENVS for environment picker
 SelectionResult run_selector(const char *base_path, const char *initial_filter,
-                             TestParams *test);
+                             TestParams *test, SelectorMode mode);
 
 #endif /* TUI_H */
