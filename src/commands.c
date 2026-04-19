@@ -336,13 +336,23 @@ static bool is_in_git_repo(void) {
 // Init command - outputs shell function definition
 // ============================================================================
 
-void cmd_init(int argc, char **argv, const char *tries_path) {
-  (void)argc; (void)argv; // May be used for future options
-
-  // If a positional argument is provided, use it as the tries path
-  // e.g., "try init /tmp/custom-path"
-  if (argc > 0 && argv[0] && argv[0][0] != '-') {
-    tries_path = argv[0];
+void cmd_init(int argc, char **argv, const char *tries_path, const char *base_path) {
+  // Parse init args: [path] [--base <path>] [--install]
+  // If --base is provided, use multi-env mode
+  // --install auto-appends to shell config file
+  bool install = false;
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "--base") == 0 && i + 1 < argc) {
+      base_path = argv[i + 1];
+      i++; // skip value
+    } else if (strncmp(argv[i], "--base=", 7) == 0) {
+      base_path = argv[i] + 7;
+    } else if (strcmp(argv[i], "--install") == 0) {
+      install = true;
+    } else if (argv[i][0] != '-') {
+      // Positional arg = tries path (single-root mode)
+      tries_path = argv[i];
+    }
   }
 
   // Determine if we're in fish shell
@@ -385,29 +395,145 @@ void cmd_init(int argc, char **argv, const char *tries_path) {
 
   // Escape paths to prevent shell injection
   Z_CLEANUP(zstr_free) zstr escaped_self = shell_escape(self_path);
-  Z_CLEANUP(zstr_free) zstr escaped_tries = shell_escape(tries_path);
+
+  // In multi-env mode, create default environment subdirectories
+  if (base_path) {
+    const char *default_envs[] = {"tries", "experiments", "prod", NULL};
+    for (int i = 0; default_envs[i]; i++) {
+      Z_CLEANUP(zstr_free) zstr env_path = join_path(base_path, default_envs[i]);
+      if (!dir_exists(zstr_cstr(&env_path))) {
+        mkdir_p(zstr_cstr(&env_path));
+      }
+    }
+  }
+
+  // Build the shell function text into a buffer so we can both print and install
+  Z_CLEANUP(zstr_free) zstr func = zstr_init();
 
   if (is_fish) {
     // Fish shell version
-    printf(
-      "function try\n"
-      "  set -l out (%s exec --path %s $argv 2>/dev/tty)\n"
-      "  or begin; echo $out; return $status; end\n"
-      "  eval $out\n"
-      "end\n",
-      zstr_cstr(&escaped_self), zstr_cstr(&escaped_tries));
+    if (base_path) {
+      Z_CLEANUP(zstr_free) zstr escaped_base = shell_escape(base_path);
+      zstr_fmt(&func,
+        "function try\n"
+        "  set -l out (%s exec --base %s $argv 2>/dev/tty)\n"
+        "  or begin; echo $out; return $status; end\n"
+        "  eval $out\n"
+        "end\n",
+        zstr_cstr(&escaped_self), zstr_cstr(&escaped_base));
+    } else {
+      Z_CLEANUP(zstr_free) zstr escaped_tries = shell_escape(tries_path);
+      zstr_fmt(&func,
+        "function try\n"
+        "  set -l out (%s exec --path %s $argv 2>/dev/tty)\n"
+        "  or begin; echo $out; return $status; end\n"
+        "  eval $out\n"
+        "end\n",
+        zstr_cstr(&escaped_self), zstr_cstr(&escaped_tries));
+    }
   } else {
     // Bash/Zsh version
-    printf(
-      "try() {\n"
-      "  local out\n"
-      "  out=$(%s exec --path %s \"$@\" 2>/dev/tty) || {\n"
-      "    echo \"$out\"\n"
-      "    return $?\n"
-      "  }\n"
-      "  eval \"$out\"\n"
-      "}\n",
-      zstr_cstr(&escaped_self), zstr_cstr(&escaped_tries));
+    if (base_path) {
+      Z_CLEANUP(zstr_free) zstr escaped_base = shell_escape(base_path);
+      zstr_fmt(&func,
+        "try() {\n"
+        "  local out\n"
+        "  out=$(%s exec --base %s \"$@\" 2>/dev/tty) || {\n"
+        "    echo \"$out\"\n"
+        "    return $?\n"
+        "  }\n"
+        "  eval \"$out\"\n"
+        "}\n",
+        zstr_cstr(&escaped_self), zstr_cstr(&escaped_base));
+    } else {
+      Z_CLEANUP(zstr_free) zstr escaped_tries = shell_escape(tries_path);
+      zstr_fmt(&func,
+        "try() {\n"
+        "  local out\n"
+        "  out=$(%s exec --path %s \"$@\" 2>/dev/tty) || {\n"
+        "    echo \"$out\"\n"
+        "    return $?\n"
+        "  }\n"
+        "  eval \"$out\"\n"
+        "}\n",
+        zstr_cstr(&escaped_self), zstr_cstr(&escaped_tries));
+    }
+  }
+
+  if (install) {
+    // Auto-detect shell config file and append
+    Z_CLEANUP(zstr_free) zstr home = get_home_dir();
+    // Must persist rc_file zstr past the if/else so rc_path stays valid
+    Z_CLEANUP(zstr_free) zstr rc_file = zstr_init();
+    const char *shell_name = "sh";
+
+    if (is_fish) {
+      // Fish config
+      Z_CLEANUP(zstr_free) zstr fish_dir = join_path(zstr_cstr(&home), ".config/fish");
+      mkdir_p(zstr_cstr(&fish_dir));
+      rc_file = join_path(zstr_cstr(&fish_dir), "config.fish");
+      shell_name = "fish";
+    } else {
+      // Check for .zshrc first, then .bashrc
+      Z_CLEANUP(zstr_free) zstr zshrc = join_path(zstr_cstr(&home), ".zshrc");
+      Z_CLEANUP(zstr_free) zstr bashrc = join_path(zstr_cstr(&home), ".bashrc");
+
+      // Prefer based on $SHELL, fallback to whichever exists
+      if (shell && strstr(shell, "zsh")) {
+        rc_file = zstr_dup(&zshrc);
+        shell_name = "zsh";
+      } else if (shell && strstr(shell, "bash")) {
+        rc_file = zstr_dup(&bashrc);
+        shell_name = "bash";
+      } else if (file_exists(zstr_cstr(&zshrc))) {
+        rc_file = zstr_dup(&zshrc);
+        shell_name = "zsh";
+      } else {
+        rc_file = zstr_dup(&bashrc);
+        shell_name = "bash";
+      }
+    }
+
+    const char *rc_path = zstr_cstr(&rc_file);
+
+    // Check if already installed (look for "try()" or "function try")
+    bool already_installed = false;
+    FILE *f = fopen(rc_path, "r");
+    if (f) {
+      char line[1024];
+      while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, "try() {") || strstr(line, "function try")) {
+          already_installed = true;
+          break;
+        }
+      }
+      fclose(f);
+    }
+
+    if (already_installed) {
+      fprintf(stderr, "Already installed in %s. To reinstall, remove the old 'try' function first.\n", rc_path);
+    } else {
+      // Append to rc file
+      f = fopen(rc_path, "a");
+      if (!f) {
+        fprintf(stderr, "Error: Could not write to %s\n", rc_path);
+      } else {
+        fprintf(f, "\n# try - ephemeral workspace manager\n");
+        fprintf(f, "%s", zstr_cstr(&func));
+        fclose(f);
+
+        fprintf(stderr, "Installed to %s (%s)\n", rc_path, shell_name);
+        if (base_path) {
+          fprintf(stderr, "Multi-env mode: %s (environments: tries, experiments, prod)\n", base_path);
+        } else {
+          fprintf(stderr, "Single-root mode: %s\n", tries_path);
+        }
+        fprintf(stderr, "Restart your shell or run: source %s\n", rc_path);
+      }
+    }
+  } else {
+    // Default: print to stdout for eval
+    printf("%s", zstr_cstr(&func));
   }
 
   if (resolved_path) {
@@ -419,7 +545,7 @@ void cmd_init(int argc, char **argv, const char *tries_path) {
 // Clone command - returns script
 // ============================================================================
 
-zstr cmd_clone(int argc, char **argv, const char *tries_path) {
+zstr cmd_clone(int argc, char **argv, const char *tries_path, const char *base_path) {
   if (argc < 1) {
     fprintf(stderr, "Usage: try clone <url> [name]\n");
     return zstr_init(); // Empty = error
@@ -428,8 +554,13 @@ zstr cmd_clone(int argc, char **argv, const char *tries_path) {
   const char *url = argv[0];
   const char *name = (argc > 1) ? argv[1] : NULL;
 
+  // In multi-env mode, clone into the first environment's directory
+  // (clone doesn't show env picker - user can specify via --path)
+  const char *target_path = tries_path;
+  (void)base_path;
+
   Z_CLEANUP(zstr_free) zstr dir_name = make_clone_dirname(url, name);
-  Z_CLEANUP(zstr_free) zstr full_path = join_path(tries_path, zstr_cstr(&dir_name));
+  Z_CLEANUP(zstr_free) zstr full_path = join_path(target_path, zstr_cstr(&dir_name));
 
   return build_clone_script(url, zstr_cstr(&full_path));
 }
@@ -438,13 +569,17 @@ zstr cmd_clone(int argc, char **argv, const char *tries_path) {
 // Worktree command - returns script
 // ============================================================================
 
-zstr cmd_worktree(int argc, char **argv, const char *tries_path) {
+zstr cmd_worktree(int argc, char **argv, const char *tries_path, const char *base_path) {
   if (argc < 1) {
     fprintf(stderr, "Usage: try worktree <name>\n");
     return zstr_init(); // Empty = error
   }
 
   const char *name = argv[0];
+
+  // In multi-env mode, worktree goes into the first environment's directory
+  const char *target_path = tries_path;
+  (void)base_path;
 
   // Build date-prefixed path
   time_t now = time(NULL);
@@ -456,7 +591,7 @@ zstr cmd_worktree(int argc, char **argv, const char *tries_path) {
   zstr_cat(&dir_name, "-");
   zstr_cat(&dir_name, name);
 
-  Z_CLEANUP(zstr_free) zstr full_path = join_path(tries_path, zstr_cstr(&dir_name));
+  Z_CLEANUP(zstr_free) zstr full_path = join_path(target_path, zstr_cstr(&dir_name));
 
   // Check if we're in a git repo
   if (is_in_git_repo()) {
@@ -471,10 +606,65 @@ zstr cmd_worktree(int argc, char **argv, const char *tries_path) {
 // Selector command - returns script
 // ============================================================================
 
-zstr cmd_selector(int argc, char **argv, const char *tries_path, TestParams *test) {
+zstr cmd_selector(int argc, char **argv, const char *tries_path, TestParams *test, const char *base_path) {
   const char *initial_filter = (argc > 0) ? argv[0] : NULL;
 
-  SelectionResult result = run_selector(tries_path, initial_filter, test);
+  // Multi-env mode: show env picker first, then folder picker
+  if (base_path) {
+    // Step 1: Environment picker
+    SelectionResult env_result = run_selector(base_path, NULL, test, SELECTOR_ENVS);
+
+    if (env_result.type == ACTION_CANCEL) {
+      fprintf(stderr, "Cancelled.\n");
+      zstr_free(&env_result.path);
+      return zstr_init();
+    }
+
+    // The selected env becomes the tries_path for the folder picker
+    const char *env_path;
+    Z_CLEANUP(zstr_free) zstr owned_path = zstr_init();
+
+    if (env_result.type == ACTION_MKDIR) {
+      // New env was created - use its path
+      env_path = zstr_cstr(&env_result.path);
+    } else {
+      // Existing env selected (ACTION_CD) - use its path
+      env_path = zstr_cstr(&env_result.path);
+    }
+
+    // Step 2: Folder picker within selected environment
+    SelectionResult result = run_selector(env_path, initial_filter, test, SELECTOR_FOLDERS);
+
+    zstr script = zstr_init();
+
+    if (result.type == ACTION_CD) {
+      script = build_cd_script(zstr_cstr(&result.path));
+    } else if (result.type == ACTION_MKDIR) {
+      script = build_mkdir_script(zstr_cstr(&result.path));
+    } else if (result.type == ACTION_DELETE) {
+      script = build_delete_script(env_path, &result.delete_names);
+      zstr *iter;
+      vec_foreach(&result.delete_names, iter) {
+        zstr_free(iter);
+      }
+      vec_free_zstr(&result.delete_names);
+    } else if (result.type == ACTION_RENAME) {
+      script = build_rename_script(env_path,
+                                    zstr_cstr(&result.rename_old_name),
+                                    zstr_cstr(&result.rename_new_name));
+      zstr_free(&result.rename_old_name);
+      zstr_free(&result.rename_new_name);
+    } else {
+      fprintf(stderr, "Cancelled.\n");
+    }
+
+    zstr_free(&env_result.path);
+    zstr_free(&result.path);
+    return script;
+  }
+
+  // Single-root mode (original behavior)
+  SelectionResult result = run_selector(tries_path, initial_filter, test, SELECTOR_FOLDERS);
 
   zstr script = zstr_init();
 
@@ -509,10 +699,10 @@ zstr cmd_selector(int argc, char **argv, const char *tries_path, TestParams *tes
 // Route subcommands (for exec mode or main routing)
 // ============================================================================
 
-zstr cmd_route(int argc, char **argv, const char *tries_path, TestParams *test) {
+zstr cmd_route(int argc, char **argv, const char *tries_path, TestParams *test, const char *base_path) {
   // No subcommand = interactive selector
   if (argc == 0) {
-    return cmd_selector(0, NULL, tries_path, test);
+    return cmd_selector(0, NULL, tries_path, test, base_path);
   }
 
   const char *subcmd = argv[0];
@@ -530,31 +720,31 @@ zstr cmd_route(int argc, char **argv, const char *tries_path, TestParams *test) 
     extern bool tui_no_colors;
     tui_no_colors = true;
     // Continue with remaining args
-    return cmd_route(argc - 1, argv + 1, tries_path, test);
+    return cmd_route(argc - 1, argv + 1, tries_path, test, base_path);
   }
 
   if (strcmp(subcmd, "init") == 0) {
     // Init always prints directly
-    cmd_init(argc - 1, argv + 1, tries_path);
+    cmd_init(argc - 1, argv + 1, tries_path, base_path);
     return zstr_init();
   } else if (strcmp(subcmd, "cd") == 0) {
     // Check if argument is a URL (clone shorthand)
     if (argc > 1 && (strncmp(argv[1], "https://", 8) == 0 ||
                      strncmp(argv[1], "http://", 7) == 0 ||
                      strncmp(argv[1], "git@", 4) == 0)) {
-      return cmd_clone(argc - 1, argv + 1, tries_path);
+      return cmd_clone(argc - 1, argv + 1, tries_path, base_path);
     }
     // Explicit cd command
-    return cmd_selector(argc - 1, argv + 1, tries_path, test);
+    return cmd_selector(argc - 1, argv + 1, tries_path, test, base_path);
   } else if (strcmp(subcmd, "clone") == 0) {
-    return cmd_clone(argc - 1, argv + 1, tries_path);
+    return cmd_clone(argc - 1, argv + 1, tries_path, base_path);
   } else if (strcmp(subcmd, "worktree") == 0) {
-    return cmd_worktree(argc - 1, argv + 1, tries_path);
+    return cmd_worktree(argc - 1, argv + 1, tries_path, base_path);
   } else if (strncmp(subcmd, "https://", 8) == 0 ||
              strncmp(subcmd, "http://", 7) == 0 ||
              strncmp(subcmd, "git@", 4) == 0) {
     // URL shorthand for clone
-    return cmd_clone(argc, argv, tries_path);
+    return cmd_clone(argc, argv, tries_path, base_path);
   } else if (strcmp(subcmd, ".") == 0) {
     // Dot shorthand for worktree (requires name)
     if (argc < 2) {
@@ -562,9 +752,9 @@ zstr cmd_route(int argc, char **argv, const char *tries_path, TestParams *test) 
       fprintf(stderr, "The name argument is required for worktree creation.\n");
       return zstr_init();
     }
-    return cmd_worktree(argc - 1, argv + 1, tries_path);
+    return cmd_worktree(argc - 1, argv + 1, tries_path, base_path);
   } else {
     // Treat as query for selector (cd is default)
-    return cmd_selector(argc, argv, tries_path, test);
+    return cmd_selector(argc, argv, tries_path, test, base_path);
   }
 }
