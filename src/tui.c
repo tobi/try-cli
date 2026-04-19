@@ -35,6 +35,7 @@ static TuiInput filter_input = {0};
 static int selected_index = 0;
 static int scroll_offset = 0;
 static int marked_count = 0;  // Number of items marked for deletion
+static SelectorMode current_mode = SELECTOR_FOLDERS;
 
 // Memoized separator line
 static zstr cached_sep_line = {0};
@@ -496,7 +497,11 @@ static void render(const char *base_path) {
 
   // Header
   TuiStyleString line = tui_screen_line(&t);
-  tui_print(&line, TUI_H1, "🏠 Try Directory Selection");
+  if (current_mode == SELECTOR_ENVS) {
+    tui_print(&line, TUI_H1, "🌍 Select Environment");
+  } else {
+    tui_print(&line, TUI_H1, "🏠 Try Directory Selection");
+  }
   tui_screen_write_truncated(&t, &line, "… ");
 
   line = tui_screen_line(&t);
@@ -573,16 +578,24 @@ static void render(const char *base_path) {
       i++;
 
       // Generate preview name
-      time_t now = time(NULL);
-      struct tm *tm = localtime(&now);
-      char date_prefix[20];
-      strftime(date_prefix, sizeof(date_prefix), "%Y-%m-%d", tm);
-
-      Z_CLEANUP(zstr_free) zstr preview = zstr_from(date_prefix);
-      zstr_cat(&preview, "-");
-      const char *filter_text = zstr_cstr(&filter_input.text);
-      for (size_t j = 0; j < zstr_len(&filter_input.text); j++) {
-        zstr_push(&preview, isspace(filter_text[j]) ? '-' : filter_text[j]);
+      Z_CLEANUP(zstr_free) zstr preview = zstr_init();
+      if (current_mode == SELECTOR_ENVS) {
+        // Environments don't get date prefixes
+        const char *filter_text = zstr_cstr(&filter_input.text);
+        for (size_t j = 0; j < zstr_len(&filter_input.text); j++) {
+          zstr_push(&preview, isspace(filter_text[j]) ? '-' : filter_text[j]);
+        }
+      } else {
+        time_t now = time(NULL);
+        struct tm *tm = localtime(&now);
+        char date_prefix[20];
+        strftime(date_prefix, sizeof(date_prefix), "%Y-%m-%d", tm);
+        zstr_cat(&preview, date_prefix);
+        zstr_cat(&preview, "-");
+        const char *filter_text = zstr_cstr(&filter_input.text);
+        for (size_t j = 0; j < zstr_len(&filter_input.text); j++) {
+          zstr_push(&preview, isspace(filter_text[j]) ? '-' : filter_text[j]);
+        }
       }
 
       line = (idx == selected_index) ? tui_screen_line_selected(&t) : tui_screen_line(&t);
@@ -609,6 +622,8 @@ static void render(const char *base_path) {
     tui_print(&line, TUI_HIGHLIGHT, "DELETE MODE");
     tui_printf(&line, NULL, " | %d marked | ", marked_count);
     tui_print(&line, TUI_DARK, "Ctrl-D: Toggle  Enter: Confirm  Esc: Cancel");
+  } else if (current_mode == SELECTOR_ENVS) {
+    tui_print(&line, TUI_DARK, "↑/↓: Navigate  Enter: Select  Type to create new  Esc: Cancel");
   } else {
     tui_print(&line, TUI_DARK, "↑/↓: Navigate  Enter: Select  ^R: Rename  ^D: Delete  Esc: Cancel");
   }
@@ -618,7 +633,10 @@ static void render(const char *base_path) {
 
 SelectionResult run_selector(const char *base_path,
                              const char *initial_filter,
-                             TestParams *test) {
+                             TestParams *test,
+                             SelectorMode mode) {
+  current_mode = mode;
+
   // Initialize filter input
   if (zstr_len(&filter_input.text) == 0 && !filter_input.text.is_long) {
     filter_input = tui_input_init();
@@ -697,8 +715,8 @@ SelectionResult run_selector(const char *base_path,
         continue;
       }
       break;
-    } else if (c == 4) {
-      // Ctrl-D: Toggle mark on current item
+    } else if (c == 4 && current_mode == SELECTOR_FOLDERS) {
+      // Ctrl-D: Toggle mark on current item (folders only)
       if (selected_index < (int)filtered_ptrs.length) {
         TryEntry *entry = filtered_ptrs.data[selected_index];
         entry->marked_for_delete = !entry->marked_for_delete;
@@ -708,8 +726,8 @@ SelectionResult run_selector(const char *base_path,
           marked_count--;
         }
       }
-    } else if (c == 18) {
-      // Ctrl-R: Rename current item
+    } else if (c == 18 && current_mode == SELECTOR_FOLDERS) {
+      // Ctrl-R: Rename current item (folders only)
       if (selected_index < (int)filtered_ptrs.length) {
         TryEntry *entry = filtered_ptrs.data[selected_index];
         zstr new_name = render_rename_dialog(entry, test);
@@ -726,8 +744,8 @@ SelectionResult run_selector(const char *base_path,
         zstr_free(&new_name);
       }
     } else if (c == ENTER_KEY) {
-      // If items are marked, show confirmation dialog
-      if (marked_count > 0) {
+      // If items are marked (folders mode only), show confirmation dialog
+      if (marked_count > 0 && current_mode == SELECTOR_FOLDERS) {
         bool confirmed = render_delete_confirmation(base_path, test);
         if (confirmed) {
           // Collect all marked paths
@@ -755,18 +773,24 @@ SelectionResult run_selector(const char *base_path,
           break;
         }
 
-        time_t now = time(NULL);
-        struct tm *t = localtime(&now);
-        char date_prefix[20];
-        strftime(date_prefix, sizeof(date_prefix), "%Y-%m-%d", t);
+        if (current_mode == SELECTOR_ENVS) {
+          // Environments don't get date prefixes
+          result.type = ACTION_MKDIR;
+          result.path = join_path(base_path, zstr_cstr(&normalized));
+        } else {
+          time_t now = time(NULL);
+          struct tm *t = localtime(&now);
+          char date_prefix[20];
+          strftime(date_prefix, sizeof(date_prefix), "%Y-%m-%d", t);
 
-        zstr new_name = zstr_from(date_prefix);
-        zstr_cat(&new_name, "-");
-        zstr_cat(&new_name, zstr_cstr(&normalized));
+          zstr new_name = zstr_from(date_prefix);
+          zstr_cat(&new_name, "-");
+          zstr_cat(&new_name, zstr_cstr(&normalized));
 
-        result.type = ACTION_MKDIR;
-        result.path = join_path(base_path, zstr_cstr(&new_name));
-        zstr_free(&new_name);
+          result.type = ACTION_MKDIR;
+          result.path = join_path(base_path, zstr_cstr(&new_name));
+          zstr_free(&new_name);
+        }
       }
       break;
     } else if (c == ARROW_UP || c == 16) {  // UP or Ctrl-P

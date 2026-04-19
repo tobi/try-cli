@@ -41,12 +41,26 @@ sudo mv try /usr/local/bin/
 
 ### Shell integration
 
-```bash
-# Add to your shell (bash/zsh)
-echo 'eval "$(try init ~/src/tries)"' >> ~/.zshrc
+**One-command setup** (auto-detects your shell and config file):
 
-# For fish shell users
-echo 'eval (try init ~/src/tries | string collect)' >> ~/.config/fish/config.fish
+```bash
+# Multi-env mode: creates ~/src with tries/, experiments/, prod/ subdirectories
+try init --base ~/src --install
+
+# Single-root mode: all experiments in one folder
+try init ~/src/tries --install
+```
+
+That's it. It creates the directories, detects your shell (zsh/bash/fish), and appends the shell function to the right config file. Restart your shell or `source` the file and you're ready.
+
+**Manual setup** (if you prefer `eval`):
+
+```bash
+# bash/zsh
+eval "$(try init --base ~/src)"
+
+# fish
+eval (try init --base ~/src | string collect)
 ```
 
 ### Build from source
@@ -99,27 +113,46 @@ Not just substring matching - it's smart:
 - Dark mode by default (because obviously)
 
 ### 📁 Organized Chaos
-- Everything lives in `~/src/tries` (configurable via `--path` or `TRY_PATH`)
+- Everything lives in `~/src/tries` (configurable via `--path`)
 - Auto-prefixes with dates: `2025-11-30-your-idea`
 - Skip the date prompt if you already typed a name
 
+### 🌍 Multi-Environment
+- Use `try init --base ~/src` to organize into multiple environments
+- Each subdirectory of `~/src` becomes an environment (tries, experiments, prod, etc.)
+- First pick an environment, then pick or create a project within it
+- Great for separating experiments from production workspaces
+
 ### Shell Integration
 
-- Bash/Zsh:
+- **Automatic** (recommended):
+
+  ```bash
+  try init --base ~/src --install    # multi-env
+  try init ~/src/tries --install     # single-root
+  ```
+
+  Auto-detects your shell and appends to `~/.zshrc`, `~/.bashrc`, or `~/.config/fish/config.fish`.
+
+- **Manual** (bash/zsh):
 
   ```bash
   # Default is ~/src/tries
   eval "$(try init)"
   # Or pick a path
   eval "$(try init ~/code/experiments)"
+  # Or use multi-env mode
+  eval "$(try init --base ~/src)"
   ```
 
-- Fish:
+- **Manual** (fish):
 
   ```fish
   eval (try init | string collect)
   # Or pick a path
   eval (try init ~/code/experiments | string collect)
+  # Or use multi-env mode
+  eval (try init --base ~/src | string collect)
   ```
 
 Notes:
@@ -134,6 +167,134 @@ try clone https://github.com/user/repo.git  # Clone repo into date-prefixed dire
 try https://github.com/user/repo.git        # Shorthand for clone (same as above)
 try --help                                   # See all options
 ```
+
+### Multi-Environment Mode
+
+With `try init --base ~/src`, you get a two-step picker:
+
+```
+$ try
+🌍 Select Environment
+──────────────────────────────
+→ 📁 experiments
+  📁 prod
+  📁 tries
+  📂 Create new: ...
+
+  ↑/↓: Navigate  Enter: Select  Type to create new  Esc: Cancel
+```
+
+Pick an environment, then the usual project picker appears for that environment.
+Create new environments by typing a name that doesn't match any existing one.
+
+#### Step-by-step walkthrough
+
+**1. Set up your base directory**
+
+Create a parent folder that will hold all your environment folders:
+
+```bash
+mkdir -p ~/src
+```
+
+**2. Install with one command**
+
+`--install` auto-detects your shell, creates the directories, and appends the shell function to your config:
+
+```bash
+try init --base ~/src --install
+```
+
+Output:
+```
+Installed to /home/user/.zshrc (zsh)
+Multi-env mode: /home/user/src (environments: tries, experiments, prod)
+Restart your shell or run: source /home/user/.zshrc
+```
+
+This creates `~/src` with three default environment folders (`tries`, `experiments`, `prod`) and adds the shell function to your `.zshrc`/`.bashrc`/fish config. No manual editing needed.
+
+**3. Restart your shell (or source the config)**
+
+```bash
+source ~/.zshrc   # or ~/.bashrc, or config.fish
+```
+
+**4. Use the two-step picker**
+
+```bash
+$ try
+```
+
+First, the **environment picker** appears showing all subdirectories of `~/src`:
+
+```
+🌍 Select Environment
+──────────────────────────────
+→ 📁 experiments
+  📁 prod
+  📁 tries
+  📂 Create new: ...
+
+  ↑/↓: Navigate  Enter: Select  Type to create new  Esc: Cancel
+```
+
+Select one (e.g. `tries`), then the **project picker** appears for that environment:
+
+```
+📁 ~/src/tries — Try Directory Selection
+──────────────────────────────
+→ 2026-04-19-redis-test         2h ago
+  2026-04-18-thread-pool        1d ago
+  2026-03-22-db-pooling         4w ago
+  + Create new: ...
+
+  ↑/↓: Navigate  Enter: Select  Type to filter/create  Ctrl-D: Delete  Ctrl-R: Rename  Esc: Cancel
+```
+
+**5. Create new environments on the fly**
+
+The three default environments (`tries`, `experiments`, `prod`) are created automatically by `--install`. You can add more on the fly:
+
+```
+🌍 Select Environment
+──────────────────────────────
+  📁 experiments
+  📁 prod
+  📁 tries
+→ 📂 Create new: prototypes
+
+  ↑/↓: Navigate  Enter: Select  Type to create new  Esc: Cancel
+```
+
+Press Enter and `~/src/prototypes` is created, then you land in the project picker for it.
+
+**6. Resulting directory structure**
+
+```
+~/src/
+├── tries/
+│   ├── 2026-04-19-redis-test/
+│   └── 2026-04-18-thread-pool/
+├── experiments/
+│   ├── 2026-04-17-rust-wasm/
+│   └── 2026-04-15-ml-model/
+├── prod/
+│   └── 2026-04-10-api-server/
+└── prototypes/          ← created on the fly
+    └── 2026-04-19-new-concept/
+```
+
+#### Comparison: Single-root vs Multi-env
+
+| | Single-root | Multi-env |
+|---|---|---|
+| **One-command setup** | `try init ~/src/tries --install` | `try init --base ~/src --install` |
+| **Manual setup** | `eval "$(try init ~/src/tries)"` | `eval "$(try init --base ~/src)"` |
+| **Picker steps** | 1 (projects only) | 2 (env then project) |
+| **Directory layout** | All projects flat in one folder | Projects grouped under env folders |
+| **Create new env** | N/A | Type a new name in the env picker |
+| **Delete/Rename** | Available for projects | Available for projects only (not envs) |
 
 ### Git Repository Cloning
 
@@ -171,19 +332,49 @@ The `.git` suffix is automatically removed from URLs when generating directory n
 
 ## Configuration
 
-Set `TRY_PATH` to change where experiments are stored:
+### Single-root mode
+
+All experiments in one folder:
 
 ```bash
-export TRY_PATH=~/code/sketches
-```
+# Automatic
+try init ~/code/sketches --install
 
-Or use the `--path` flag:
-
-```bash
+# Manual
 eval "$(try init ~/code/sketches)"
 ```
 
 Default: `~/src/tries`
+
+### Multi-env mode
+
+Separate environments under a base directory:
+
+```bash
+# Automatic (creates tries/, experiments/, prod/ subdirectories)
+try init --base ~/src --install
+
+# Manual
+eval "$(try init --base ~/src)"
+```
+
+This makes each subdirectory of `~/src` an environment (e.g. `~/src/tries`, `~/src/experiments`, `~/src/prod`). The TUI shows an environment picker first, then a project picker within the selected environment.
+
+### The `--install` flag
+
+Appends the shell function to your shell config file automatically:
+- Detects your shell from `$SHELL` (zsh, bash, or fish)
+- Appends to `~/.zshrc`, `~/.bashrc`, or `~/.config/fish/config.fish`
+- Skips if a `try` function is already present
+- Works with both single-root and multi-env modes
+
+### Override per-invocation
+
+Use `--path` to override the tries path for a single command:
+
+```bash
+try --path ~/code/sketches redis
+```
 
 ## Arch Linux
 

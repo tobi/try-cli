@@ -7,16 +7,19 @@
 #define SCRIPT_HEADER "# if you can read this, you didn't launch try from an alias. run try --help.\n"
 
 // Init command - outputs shell function definition (always prints directly)
-void cmd_init(int argc, char **argv, const char *tries_path);
+// tries_path: single-root mode (NULL in multi-env mode)
+// base_path: multi-env base directory (NULL in single-root mode)
+void cmd_init(int argc, char **argv, const char *tries_path, const char *base_path);
 
 // Commands return shell scripts to execute
 // Returns empty zstr on error (after printing error to stderr)
-zstr cmd_clone(int argc, char **argv, const char *tries_path);
-zstr cmd_worktree(int argc, char **argv, const char *tries_path);
-zstr cmd_selector(int argc, char **argv, const char *tries_path, TestParams *test);
+// base_path: if non-NULL, enables multi-env mode (env picker first)
+zstr cmd_clone(int argc, char **argv, const char *tries_path, const char *base_path);
+zstr cmd_worktree(int argc, char **argv, const char *tries_path, const char *base_path);
+zstr cmd_selector(int argc, char **argv, const char *tries_path, TestParams *test, const char *base_path);
 
 // Route subcommands (for exec mode)
-zstr cmd_route(int argc, char **argv, const char *tries_path, TestParams *test);
+zstr cmd_route(int argc, char **argv, const char *tries_path, TestParams *test, const char *base_path);
 
 // Execute or print a script
 // exec_mode: true = print with header, false = execute via bash

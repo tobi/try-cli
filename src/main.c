@@ -33,12 +33,12 @@ static void print_help(void) {
   zstr_cat(&help, "  ");
   tui_zstr_printf(&help, ANSI_BRIGHT_BLUE, "# bash/zsh (~/.bashrc or ~/.zshrc)");
   zstr_cat(&help, "\n");
-  zstr_cat(&help, "  eval \"$(try init ~/src/tries)\"\n\n");
+  zstr_cat(&help, "  try init --base ~/src --install\n\n");
 
   zstr_cat(&help, "  ");
   tui_zstr_printf(&help, ANSI_BRIGHT_BLUE, "# fish (~/.config/fish/config.fish)");
   zstr_cat(&help, "\n");
-  zstr_cat(&help, "  eval (try init ~/src/tries | string collect)\n\n");
+  zstr_cat(&help, "  SHELL=/usr/bin/fish try init --base ~/src --install\n\n");
 
   // Commands section
   tui_zstr_printf(&help, TUI_H1, "Commands:");
@@ -83,6 +83,10 @@ static void print_help(void) {
   zstr_cat(&help, " (override with ");
   tui_zstr_printf(&help, TUI_BOLD, "--path");
   zstr_cat(&help, " on init)\n");
+
+  zstr_cat(&help, "  Multi-env: ");
+  tui_zstr_printf(&help, TUI_BOLD, "try init --base ~/src");
+  zstr_cat(&help, "\n");
 
   zstr_cat(&help, "  Current: ");
   tui_zstr_printf(&help, TUI_BOLD, zstr_cstr(&default_path));
@@ -134,6 +138,7 @@ static const char *parse_option_value(const char *arg, const char *next_arg,
 
 int main(int argc, char **argv) {
   Z_CLEANUP(zstr_free) zstr tries_path = zstr_init();
+  Z_CLEANUP(zstr_free) zstr base_path = zstr_init();
   Z_CLEANUP(vec_free_char_ptr) vec_char_ptr cmd_args = vec_init_capacity_char_ptr(argc);
 
   // Check NO_COLOR environment variable (https://no-color.org/)
@@ -177,6 +182,12 @@ int main(int argc, char **argv) {
       i += skip;
       continue;
     }
+    if ((value = parse_option_value(arg, next, "--base", &skip))) {
+      zstr_free(&base_path);
+      base_path = zstr_from(value);
+      i += skip;
+      continue;
+    }
     if ((value = parse_option_value(arg, next, "--and-keys", &skip))) {
       test.inject_keys = value;
       i += skip;
@@ -187,9 +198,30 @@ int main(int argc, char **argv) {
     vec_push_char_ptr(&cmd_args, argv[i]);
   }
 
-  // Default tries path
-  if (zstr_is_empty(&tries_path)) {
-    tries_path = get_default_tries_path();
+  // Determine paths
+  // --base means multi-env mode: base_path contains environments as subdirs
+  // --path or default means single-root mode
+  const char *base_path_cstr = NULL;  // NULL = single-root mode
+
+  if (!zstr_is_empty(&base_path)) {
+    base_path_cstr = zstr_cstr(&base_path);
+    // Ensure base directory exists
+    if (!dir_exists(base_path_cstr)) {
+      if (mkdir_p(base_path_cstr) != 0) {
+        fprintf(stderr, "Error: Could not create base directory: %s\n", base_path_cstr);
+        return 1;
+      }
+    }
+    // In multi-env mode, tries_path may be empty (clone/worktree use it)
+    // Default to the first subdir or leave empty
+    if (zstr_is_empty(&tries_path)) {
+      tries_path = get_default_tries_path();
+    }
+  } else {
+    // Single-root mode
+    if (zstr_is_empty(&tries_path)) {
+      tries_path = get_default_tries_path();
+    }
   }
 
   if (zstr_is_empty(&tries_path)) {
@@ -217,13 +249,13 @@ int main(int argc, char **argv) {
 
   // Route commands
   if (strcmp(command, "init") == 0) {
-    cmd_init((int)cmd_args.length - 1, cmd_args.data + 1, path_cstr);
+    cmd_init((int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, base_path_cstr);
     return 0;
   } else if (strcmp(command, "exec") == 0) {
     // Exec mode - route subcommand and print script
     exec_mode = true;
     Z_CLEANUP(zstr_free) zstr script = cmd_route(
-        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &test);
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &test, base_path_cstr);
     if (zstr_is_empty(&script)) {
       return 1; // Error or special case (like init)
     }
@@ -231,7 +263,7 @@ int main(int argc, char **argv) {
   } else if (strcmp(command, "cd") == 0) {
     // Direct mode cd (interactive selector)
     Z_CLEANUP(zstr_free) zstr script = cmd_selector(
-        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &test);
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, &test, base_path_cstr);
     if (zstr_is_empty(&script)) {
       return 1;
     }
@@ -239,7 +271,7 @@ int main(int argc, char **argv) {
   } else if (strcmp(command, "clone") == 0) {
     // Direct mode clone
     Z_CLEANUP(zstr_free) zstr script = cmd_clone(
-        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr);
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, base_path_cstr);
     if (zstr_is_empty(&script)) {
       return 1;
     }
@@ -247,7 +279,7 @@ int main(int argc, char **argv) {
   } else if (strcmp(command, "worktree") == 0) {
     // Direct mode worktree
     Z_CLEANUP(zstr_free) zstr script = cmd_worktree(
-        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr);
+        (int)cmd_args.length - 1, cmd_args.data + 1, path_cstr, base_path_cstr);
     if (zstr_is_empty(&script)) {
       return 1;
     }
@@ -257,7 +289,7 @@ int main(int argc, char **argv) {
              strncmp(command, "git@", 4) == 0) {
     // URL shorthand for clone: try <url> = try clone <url>
     Z_CLEANUP(zstr_free) zstr script = cmd_clone(
-        (int)cmd_args.length, cmd_args.data, path_cstr);
+        (int)cmd_args.length, cmd_args.data, path_cstr, base_path_cstr);
     if (zstr_is_empty(&script)) {
       return 1;
     }
