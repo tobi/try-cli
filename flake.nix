@@ -96,6 +96,7 @@
             nativeBuildInputs = with pkgs; [
               gcc
               gnumake
+              patchelf
             ];
 
             buildPhase = ''
@@ -105,6 +106,8 @@
             installPhase = ''
               mkdir -p $out/bin
               cp dist/try $out/bin/
+              # Set portable interpreter path for non-Nix systems
+              patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 $out/bin/try
             '';
 
             meta = with pkgs.lib; {
@@ -125,6 +128,7 @@
             nativeBuildInputs = with pkgs.pkgsCross.aarch64-multiplatform; [
               gcc
               gnumake
+              patchelf
             ];
 
             buildPhase = ''
@@ -134,6 +138,8 @@
             installPhase = ''
               mkdir -p $out/bin
               cp dist/try $out/bin/
+              # Set portable interpreter path for non-Nix systems
+              patchelf --set-interpreter /lib/ld-linux-aarch64.so.1 $out/bin/try
             '';
 
             meta = with pkgs.lib; {
