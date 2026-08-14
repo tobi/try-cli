@@ -53,11 +53,38 @@ jobs:
         path: result/bin/try
         retention-days: 7
 
+  build-macos:
+    environment: OpenSource
+    name: Build macOS (${{ matrix.arch }})
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            cc: clang -arch x86_64
+          - arch: aarch64
+            cc: clang
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Build
+      run: make CC="${{ matrix.cc }}"
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v5
+      with:
+        name: try-darwin-${{ matrix.arch }}
+        path: dist/try
+        retention-days: 7
+
   release:
     environment: OpenSource
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: cross-compile
+    needs: [cross-compile, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
